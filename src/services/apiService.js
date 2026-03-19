@@ -1,3 +1,5 @@
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
+
 async function fetchJson(url) {
   const res = await fetch(url);
 
@@ -8,11 +10,11 @@ async function fetchJson(url) {
   return res.json();
 }
 
-async function getSalesFromApi(baseUrl = 'http://localhost:3000') {
+async function getSalesFromApi(baseUrl = BASE_URL) {
   return fetchJson(`${baseUrl}/api/sales-with-items`);
 }
 
-async function getItemsFromApi(accountId, baseUrl = 'http://localhost:3000') {
+async function getItemsFromApi(accountId, baseUrl = BASE_URL) {
   if (!accountId) {
     throw new Error('accountId is required for getItemsFromApi');
   }
