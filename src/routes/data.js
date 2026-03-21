@@ -2,6 +2,104 @@ const express = require('express')
 const router = express.Router()
 const { apiRequest } = require('../lightspeed')
 
+const STORE_MAP = {
+  west: '1',
+  south: '3'
+}
+
+function getItemArray(itemsData) {
+  if (Array.isArray(itemsData?.Item)) return itemsData.Item
+  if (itemsData?.Item) return [itemsData.Item]
+  return []
+}
+
+function getItemShops(item) {
+  const itemShopsContainer = item.ItemShops
+
+  if (Array.isArray(itemShopsContainer)) return itemShopsContainer
+  if (Array.isArray(itemShopsContainer?.ItemShop)) return itemShopsContainer.ItemShop
+  if (itemShopsContainer?.ItemShop) return [itemShopsContainer.ItemShop]
+
+  return []
+}
+
+function getStoreQuantities(item) {
+  const itemShops = getItemShops(item)
+
+  let westQty = 0
+  let southQty = 0
+
+  for (const shop of itemShops) {
+    const shopId = String(shop.shopID || shop.ShopID || '').trim()
+    const qoh = Number(shop.qoh || shop.QOH || shop.quantity || 0)
+
+    if (shopId === STORE_MAP.west) westQty += qoh
+    if (shopId === STORE_MAP.south) southQty += qoh
+  }
+
+  return {
+    westQty,
+    southQty,
+    totalQty: westQty + southQty
+  }
+}
+
+function getSelectedQty(store, westQty, southQty) {
+  if (store === 'west') return westQty
+  if (store === 'south') return southQty
+  return westQty + southQty
+}
+
+function escapeCsv(value) {
+  const stringValue = String(value ?? '')
+  if (
+    stringValue.includes('"') ||
+    stringValue.includes(',') ||
+    stringValue.includes('\n')
+  ) {
+    return `"${stringValue.replace(/"/g, '""')}"`
+  }
+  return stringValue
+}
+
+async function buildSoldMap(accountId, startIso, store) {
+  const saleLinesData = await apiRequest(
+    accountId,
+    `SaleLine.json?timeStamp=>,${encodeURIComponent(startIso)}&limit=10000`
+  )
+
+  const saleLines = Array.isArray(saleLinesData?.SaleLine)
+    ? saleLinesData.SaleLine
+    : saleLinesData?.SaleLine
+      ? [saleLinesData.SaleLine]
+      : []
+
+  const soldMap = {}
+
+  for (const line of saleLines) {
+    const itemId = String(line.itemID || line.ItemID || '').trim()
+    const shopId = String(line.shopID || line.ShopID || '').trim()
+
+    if (!itemId) continue
+
+    // Exclude non-normal retail movement
+    if (String(line.isLayaway) === 'true') continue
+    if (String(line.isSpecialOrder) === 'true') continue
+    if (String(line.isWorkorder) === 'true') continue
+
+    // Store filter
+    if (store === 'west' && shopId !== STORE_MAP.west) continue
+    if (store === 'south' && shopId !== STORE_MAP.south) continue
+
+    const qty = Number(line.unitQuantity || line.UnitQuantity || line.quantity || 0)
+
+    if (!soldMap[itemId]) soldMap[itemId] = 0
+    soldMap[itemId] += qty
+  }
+
+  return soldMap
+}
+
 router.get('/items/:accountId', async (req, res) => {
   const { accountId } = req.params
 
@@ -34,11 +132,6 @@ router.get('/reports/dust/:accountId', async (req, res) => {
     const { accountId } = req.params
     const { days = 30, store = 'both', format = 'json' } = req.query
 
-    const STORE_MAP = {
-      west: '1',
-      south: '3'
-    }
-
     if (!['west', 'south', 'both'].includes(store)) {
       return res.status(400).json({
         error: 'Invalid store. Use west, south, or both.'
@@ -60,39 +153,8 @@ router.get('/reports/dust/:accountId', async (req, res) => {
       'Item.json?load_relations=["ItemShops"]&limit=10000'
     )
 
-    const items = itemsData?.Item || []
-
-    const salesData = await apiRequest(
-      accountId,
-      `Sale.json?timeStamp=>,${encodeURIComponent(startIso)}&load_relations=["SaleLines"]&limit=10000`
-    )
-
-    const sales = salesData?.Sale || []
-
-    const soldMap = {}
-
-    for (const sale of sales) {
-      const saleLinesContainer = sale.SaleLines
-
-      let saleLines = []
-      if (Array.isArray(saleLinesContainer)) {
-        saleLines = saleLinesContainer
-      } else if (Array.isArray(saleLinesContainer?.SaleLine)) {
-        saleLines = saleLinesContainer.SaleLine
-      } else if (saleLinesContainer?.SaleLine) {
-        saleLines = [saleLinesContainer.SaleLine]
-      }
-
-      for (const line of saleLines) {
-        const itemId = String(line.itemID || line.ItemID || '').trim()
-        if (!itemId) continue
-
-        const qty = Number(line.unitQuantity || line.UnitQuantity || line.quantity || 0)
-
-        if (!soldMap[itemId]) soldMap[itemId] = 0
-        soldMap[itemId] += qty
-      }
-    }
+    const items = getItemArray(itemsData)
+    const soldMap = await buildSoldMap(accountId, startIso, store)
 
     const rows = []
 
@@ -100,48 +162,25 @@ router.get('/reports/dust/:accountId', async (req, res) => {
       const itemId = String(item.itemID || item.ItemID || '').trim()
       if (!itemId) continue
 
+      const systemId = item.systemSku || item.SystemSku || ''
       const description = item.description || item.Description || ''
       const customSku = item.customSku || item.CustomSKU || ''
       const upc = item.upc || item.UPC || ''
 
-      const itemShopsContainer = item.ItemShops
-
-      let itemShops = []
-      if (Array.isArray(itemShopsContainer)) {
-        itemShops = itemShopsContainer
-      } else if (Array.isArray(itemShopsContainer?.ItemShop)) {
-        itemShops = itemShopsContainer.ItemShop
-      } else if (itemShopsContainer?.ItemShop) {
-        itemShops = [itemShopsContainer.ItemShop]
-      }
-
-      let westQty = 0
-      let southQty = 0
-
-      for (const shop of itemShops) {
-        const shopId = String(shop.shopID || shop.ShopID || '').trim()
-        const qoh = Number(shop.qoh || shop.QOH || shop.quantity || 0)
-
-        if (shopId === STORE_MAP.west) westQty += qoh
-        if (shopId === STORE_MAP.south) southQty += qoh
-      }
-
-      let selectedQty = 0
-      if (store === 'west') selectedQty = westQty
-      else if (store === 'south') selectedQty = southQty
-      else selectedQty = westQty + southQty
-
+      const { westQty, southQty, totalQty } = getStoreQuantities(item)
+      const selectedQty = getSelectedQty(store, westQty, southQty)
       const qtySold = Number(soldMap[itemId] || 0)
 
       if (selectedQty > 0 && qtySold === 0) {
         rows.push({
           itemId,
+          systemId,
           description,
           customSku,
           upc,
           westQty,
           southQty,
-          totalQty: westQty + southQty,
+          totalQty,
           qtyInSelectedStore: selectedQty,
           qtySold
         })
@@ -153,6 +192,7 @@ router.get('/reports/dust/:accountId', async (req, res) => {
     if (format === 'csv') {
       const headers = [
         'Item ID',
+        'System ID',
         'Description',
         'Custom SKU',
         'UPC',
@@ -163,19 +203,12 @@ router.get('/reports/dust/:accountId', async (req, res) => {
         'Qty Sold'
       ]
 
-      const escapeCsv = (value) => {
-        const stringValue = String(value ?? '')
-        if (stringValue.includes('"') || stringValue.includes(',') || stringValue.includes('\n')) {
-          return `"${stringValue.replace(/"/g, '""')}"`
-        }
-        return stringValue
-      }
-
       const csvRows = [
         headers.join(','),
         ...rows.map(row =>
           [
             row.itemId,
+            row.systemId,
             row.description,
             row.customSku,
             row.upc,
@@ -226,13 +259,12 @@ router.get('/reports/slow-movers/:accountId', async (req, res) => {
     const { accountId } = req.params
     const { days = 30, store = 'both', maxSold = 2, format = 'json' } = req.query
 
-    const STORE_MAP = {
-      west: '1',
-      south: '3'
-    }
-
     if (!['west', 'south', 'both'].includes(store)) {
       return res.status(400).json({ error: 'Invalid store' })
+    }
+
+    if (!['json', 'csv'].includes(format)) {
+      return res.status(400).json({ error: 'Invalid format. Use json or csv.' })
     }
 
     const startDate = new Date()
@@ -243,37 +275,9 @@ router.get('/reports/slow-movers/:accountId', async (req, res) => {
       accountId,
       'Item.json?load_relations=["ItemShops"]&limit=10000'
     )
-    const items = itemsData?.Item || []
 
-    const salesData = await apiRequest(
-      accountId,
-      `Sale.json?timeStamp=>,${encodeURIComponent(startIso)}&load_relations=["SaleLines"]&limit=10000`
-    )
-    const sales = salesData?.Sale || []
-
-    const soldMap = {}
-
-    for (const sale of sales) {
-      let saleLines = []
-
-      if (Array.isArray(sale.SaleLines)) {
-        saleLines = sale.SaleLines
-      } else if (Array.isArray(sale.SaleLines?.SaleLine)) {
-        saleLines = sale.SaleLines.SaleLine
-      } else if (sale.SaleLines?.SaleLine) {
-        saleLines = [sale.SaleLines.SaleLine]
-      }
-
-      for (const line of saleLines) {
-        const itemId = String(line.itemID || line.ItemID || '').trim()
-        if (!itemId) continue
-
-        const qty = Number(line.unitQuantity || line.UnitQuantity || 0)
-
-        if (!soldMap[itemId]) soldMap[itemId] = 0
-        soldMap[itemId] += qty
-      }
-    }
+    const items = getItemArray(itemsData)
+    const soldMap = await buildSoldMap(accountId, startIso, store)
 
     const rows = []
 
@@ -281,79 +285,70 @@ router.get('/reports/slow-movers/:accountId', async (req, res) => {
       const itemId = String(item.itemID || item.ItemID || '').trim()
       if (!itemId) continue
 
+      const systemId = item.systemSku || item.SystemSku || ''
       const description = item.description || item.Description || ''
       const customSku = item.customSku || item.CustomSKU || ''
+      const upc = item.upc || item.UPC || ''
 
-      let westQty = 0
-      let southQty = 0
-
-      let itemShops = []
-      if (Array.isArray(item.ItemShops)) {
-        itemShops = item.ItemShops
-      } else if (Array.isArray(item.ItemShops?.ItemShop)) {
-        itemShops = item.ItemShops.ItemShop
-      } else if (item.ItemShops?.ItemShop) {
-        itemShops = [item.ItemShops.ItemShop]
-      }
-
-      for (const shop of itemShops) {
-        const shopId = String(shop.shopID || shop.ShopID || '').trim()
-        const qoh = Number(shop.qoh || shop.QOH || 0)
-
-        if (shopId === STORE_MAP.west) westQty += qoh
-        if (shopId === STORE_MAP.south) southQty += qoh
-      }
-
-      let selectedQty = 0
-      if (store === 'west') selectedQty = westQty
-      else if (store === 'south') selectedQty = southQty
-      else selectedQty = westQty + southQty
-
+      const { westQty, southQty, totalQty } = getStoreQuantities(item)
+      const selectedQty = getSelectedQty(store, westQty, southQty)
       const qtySold = Number(soldMap[itemId] || 0)
 
       if (selectedQty > 0 && qtySold > 0 && qtySold <= Number(maxSold)) {
         rows.push({
           itemId,
+          systemId,
           description,
           customSku,
+          upc,
           westQty,
           southQty,
-          totalQty: westQty + southQty,
+          totalQty,
+          qtyInSelectedStore: selectedQty,
           qtySold
         })
       }
     }
 
-    rows.sort((a, b) => a.qtySold - b.qtySold)
+    rows.sort((a, b) => a.qtySold - b.qtySold || b.qtyInSelectedStore - a.qtyInSelectedStore)
 
     if (format === 'csv') {
       const headers = [
         'Item ID',
+        'System ID',
         'Description',
         'Custom SKU',
+        'UPC',
         'West Qty',
         'South Qty',
         'Total Qty',
+        'Qty In Selected Store',
         'Qty Sold'
       ]
 
       const csvRows = [
         headers.join(','),
-        ...rows.map(r =>
+        ...rows.map(row =>
           [
-            r.itemId,
-            `"${r.description}"`,
-            r.customSku,
-            r.westQty,
-            r.southQty,
-            r.totalQty,
-            r.qtySold
-          ].join(',')
+            row.itemId,
+            row.systemId,
+            row.description,
+            row.customSku,
+            row.upc,
+            row.westQty,
+            row.southQty,
+            row.totalQty,
+            row.qtyInSelectedStore,
+            row.qtySold
+          ].map(escapeCsv).join(',')
         )
       ]
 
       res.setHeader('Content-Type', 'text/csv')
-      res.setHeader('Content-Disposition', `attachment; filename="slow-movers.csv"`)
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="slow-movers-${store}-${days}days-max${maxSold}.csv"`
+      )
 
       return res.send(csvRows.join('\n'))
     }
@@ -361,6 +356,14 @@ router.get('/reports/slow-movers/:accountId', async (req, res) => {
     return res.json({
       success: true,
       report: 'slow-movers',
+      filters: {
+        accountId,
+        store,
+        days: Number(days),
+        maxSold: Number(maxSold),
+        startDate: startIso,
+        format
+      },
       count: rows.length,
       rows
     })
@@ -384,11 +387,15 @@ router.get('/reports/test-salelines/:accountId', async (req, res) => {
       `SaleLine.json?timeStamp=>,${encodeURIComponent(startIso)}&limit=20`
     )
 
-    const saleLines = saleLinesData?.SaleLine || []
+    const saleLines = Array.isArray(saleLinesData?.SaleLine)
+      ? saleLinesData.SaleLine
+      : saleLinesData?.SaleLine
+        ? [saleLinesData.SaleLine]
+        : []
 
     return res.json({
       success: true,
-      count: Array.isArray(saleLines) ? saleLines.length : 0,
+      count: saleLines.length,
       sample: saleLines
     })
   } catch (err) {
@@ -414,4 +421,5 @@ router.get('/reports/test-item/:accountId/:itemId', async (req, res) => {
     return res.status(500).json({ error: err.message })
   }
 })
+
 module.exports = router
