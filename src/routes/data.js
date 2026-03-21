@@ -301,10 +301,9 @@ router.get('/reports/slow-movers/:accountId', async (req, res) => {
       const qtySold = Number(soldMap[itemId] || 0)
 
       if (
-        selectedQty >= Number(minStock) &&
-        qtySold > 0 &&
-        qtySold <= Number(maxSold)
-      ) {
+  selectedQty >= Number(minStock) &&
+  qtySold <= Number(maxSold)
+) {
         rows.push({
           itemId,
           systemId,
