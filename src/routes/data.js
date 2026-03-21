@@ -220,4 +220,154 @@ router.get('/reports/dust/:accountId', async (req, res) => {
   }
 })
 
+// SLOW MOVERS REPORT
+router.get('/reports/slow-movers/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params
+    const { days = 30, store = 'both', maxSold = 2, format = 'json' } = req.query
+
+    const STORE_MAP = {
+      west: '1',
+      south: '3'
+    }
+
+    if (!['west', 'south', 'both'].includes(store)) {
+      return res.status(400).json({ error: 'Invalid store' })
+    }
+
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - Number(days))
+    const startIso = startDate.toISOString()
+
+    const itemsData = await apiRequest(
+      accountId,
+      'Item.json?load_relations=["ItemShops"]&limit=10000'
+    )
+    const items = itemsData?.Item || []
+
+    const salesData = await apiRequest(
+      accountId,
+      `Sale.json?timeStamp=>,${encodeURIComponent(startIso)}&load_relations=["SaleLines"]&limit=10000`
+    )
+    const sales = salesData?.Sale || []
+
+    const soldMap = {}
+
+    for (const sale of sales) {
+      let saleLines = []
+
+      if (Array.isArray(sale.SaleLines)) {
+        saleLines = sale.SaleLines
+      } else if (Array.isArray(sale.SaleLines?.SaleLine)) {
+        saleLines = sale.SaleLines.SaleLine
+      } else if (sale.SaleLines?.SaleLine) {
+        saleLines = [sale.SaleLines.SaleLine]
+      }
+
+      for (const line of saleLines) {
+        const itemId = String(line.itemID || line.ItemID || '').trim()
+        if (!itemId) continue
+
+        const qty = Number(line.unitQuantity || line.UnitQuantity || 0)
+
+        if (!soldMap[itemId]) soldMap[itemId] = 0
+        soldMap[itemId] += qty
+      }
+    }
+
+    const rows = []
+
+    for (const item of items) {
+      const itemId = String(item.itemID || item.ItemID || '').trim()
+      if (!itemId) continue
+
+      const description = item.description || item.Description || ''
+      const customSku = item.customSku || item.CustomSKU || ''
+
+      let westQty = 0
+      let southQty = 0
+
+      let itemShops = []
+      if (Array.isArray(item.ItemShops)) {
+        itemShops = item.ItemShops
+      } else if (Array.isArray(item.ItemShops?.ItemShop)) {
+        itemShops = item.ItemShops.ItemShop
+      } else if (item.ItemShops?.ItemShop) {
+        itemShops = [item.ItemShops.ItemShop]
+      }
+
+      for (const shop of itemShops) {
+        const shopId = String(shop.shopID || shop.ShopID || '').trim()
+        const qoh = Number(shop.qoh || shop.QOH || 0)
+
+        if (shopId === STORE_MAP.west) westQty += qoh
+        if (shopId === STORE_MAP.south) southQty += qoh
+      }
+
+      let selectedQty = 0
+      if (store === 'west') selectedQty = westQty
+      else if (store === 'south') selectedQty = southQty
+      else selectedQty = westQty + southQty
+
+      const qtySold = Number(soldMap[itemId] || 0)
+
+      if (selectedQty > 0 && qtySold > 0 && qtySold <= Number(maxSold)) {
+        rows.push({
+          itemId,
+          description,
+          customSku,
+          westQty,
+          southQty,
+          totalQty: westQty + southQty,
+          qtySold
+        })
+      }
+    }
+
+    rows.sort((a, b) => a.qtySold - b.qtySold)
+
+    if (format === 'csv') {
+      const headers = [
+        'Item ID',
+        'Description',
+        'Custom SKU',
+        'West Qty',
+        'South Qty',
+        'Total Qty',
+        'Qty Sold'
+      ]
+
+      const csvRows = [
+        headers.join(','),
+        ...rows.map(r =>
+          [
+            r.itemId,
+            `"${r.description}"`,
+            r.customSku,
+            r.westQty,
+            r.southQty,
+            r.totalQty,
+            r.qtySold
+          ].join(',')
+        )
+      ]
+
+      res.setHeader('Content-Type', 'text/csv')
+      res.setHeader('Content-Disposition', `attachment; filename="slow-movers.csv"`)
+
+      return res.send(csvRows.join('\n'))
+    }
+
+    return res.json({
+      success: true,
+      report: 'slow-movers',
+      count: rows.length,
+      rows
+    })
+  } catch (err) {
+    console.error('Slow movers error:', err.message)
+    return res.status(500).json({ error: err.message })
+  }
+})
+
 module.exports = router
