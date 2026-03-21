@@ -15,6 +15,10 @@ app.get('/', (req, res) => {
 app.use('/auth', authRoutes)
 app.use('/api', dataRoutes)
 
+// Add this block for debug routes
+const debugRoutes = require('./routes/debug');
+app.use('/api/debug', debugRoutes);   // ← your line
+
 const PORT = process.env.PORT || 3000
 
 app.listen(PORT, () => {
