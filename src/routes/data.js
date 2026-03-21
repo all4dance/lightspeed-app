@@ -257,7 +257,13 @@ router.get('/reports/dust/:accountId', async (req, res) => {
 router.get('/reports/slow-movers/:accountId', async (req, res) => {
   try {
     const { accountId } = req.params
-    const { days = 30, store = 'both', maxSold = 2, format = 'json' } = req.query
+    const {
+      days = 90,
+      store = 'both',
+      maxSold = 10,
+      minStock = 2,
+      format = 'json'
+    } = req.query
 
     if (!['west', 'south', 'both'].includes(store)) {
       return res.status(400).json({ error: 'Invalid store' })
@@ -294,7 +300,11 @@ router.get('/reports/slow-movers/:accountId', async (req, res) => {
       const selectedQty = getSelectedQty(store, westQty, southQty)
       const qtySold = Number(soldMap[itemId] || 0)
 
-      if (selectedQty > 0 && qtySold > 0 && qtySold <= Number(maxSold)) {
+      if (
+        selectedQty >= Number(minStock) &&
+        qtySold > 0 &&
+        qtySold <= Number(maxSold)
+      ) {
         rows.push({
           itemId,
           systemId,
@@ -310,7 +320,10 @@ router.get('/reports/slow-movers/:accountId', async (req, res) => {
       }
     }
 
-    rows.sort((a, b) => a.qtySold - b.qtySold || b.qtyInSelectedStore - a.qtyInSelectedStore)
+    rows.sort((a, b) => {
+      if (a.qtySold !== b.qtySold) return a.qtySold - b.qtySold
+      return b.qtyInSelectedStore - a.qtyInSelectedStore
+    })
 
     if (format === 'csv') {
       const headers = [
@@ -347,7 +360,7 @@ router.get('/reports/slow-movers/:accountId', async (req, res) => {
       res.setHeader('Content-Type', 'text/csv')
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="slow-movers-${store}-${days}days-max${maxSold}.csv"`
+        `attachment; filename="slow-movers-${store}-${days}days-max${maxSold}-minstock${minStock}.csv"`
       )
 
       return res.send(csvRows.join('\n'))
@@ -361,6 +374,7 @@ router.get('/reports/slow-movers/:accountId', async (req, res) => {
         store,
         days: Number(days),
         maxSold: Number(maxSold),
+        minStock: Number(minStock),
         startDate: startIso,
         format
       },
