@@ -302,6 +302,7 @@ router.get('/reports/slow-movers/:accountId', async (req, res) => {
 
       if (
   selectedQty >= Number(minStock) &&
+  qtySold > 0 &&
   qtySold <= Number(maxSold)
 ) {
         rows.push({
