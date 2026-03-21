@@ -370,4 +370,33 @@ router.get('/reports/slow-movers/:accountId', async (req, res) => {
   }
 })
 
+// TEST SALE LINES
+router.get('/reports/test-salelines/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params
+
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - 30)
+    const startIso = startDate.toISOString()
+
+    const saleLinesData = await apiRequest(
+      accountId,
+      `SaleLine.json?timeStamp=>,${encodeURIComponent(startIso)}&limit=20`
+    )
+
+    const saleLines = saleLinesData?.SaleLine || []
+
+    return res.json({
+      success: true,
+      count: Array.isArray(saleLines) ? saleLines.length : 0,
+      sample: saleLines
+    })
+  } catch (err) {
+    console.error('Test sale lines error:', err.message)
+    return res.status(500).json({
+      error: err.message
+    })
+  }
+})
+
 module.exports = router
