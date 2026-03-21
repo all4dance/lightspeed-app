@@ -408,10 +408,10 @@ router.get('/reports/test-item/:accountId/:itemId', async (req, res) => {
       `Item/${itemId}.json?load_relations=["ItemShops"]`
     )
 
-    res.json(data)
+    return res.json(data)
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    console.error('Test item error:', err.message)
+    return res.status(500).json({ error: err.message })
   }
 })
-
 module.exports = router
