@@ -32,7 +32,7 @@ router.get('/sales/:accountId', async (req, res) => {
 router.get('/reports/dust/:accountId', async (req, res) => {
   try {
     const { accountId } = req.params
-    const { days = 30, store = 'both' } = req.query
+    const { days = 30, store = 'both', format = 'json' } = req.query
 
     const STORE_MAP = {
       west: '1',
@@ -45,11 +45,16 @@ router.get('/reports/dust/:accountId', async (req, res) => {
       })
     }
 
+    if (!['json', 'csv'].includes(format)) {
+      return res.status(400).json({
+        error: 'Invalid format. Use json or csv.'
+      })
+    }
+
     const startDate = new Date()
     startDate.setDate(startDate.getDate() - Number(days))
     const startIso = startDate.toISOString()
 
-    // 1) Pull items with ItemShops so we can see QOH per store
     const itemsData = await apiRequest(
       accountId,
       'Item.json?load_relations=["ItemShops"]&limit=10000'
@@ -57,8 +62,6 @@ router.get('/reports/dust/:accountId', async (req, res) => {
 
     const items = itemsData?.Item || []
 
-    // 2) Pull sales since start date
-    // We will use SaleLine relations if available
     const salesData = await apiRequest(
       accountId,
       `Sale.json?timeStamp=>,${encodeURIComponent(startIso)}&load_relations=["SaleLines"]&limit=10000`
@@ -66,7 +69,6 @@ router.get('/reports/dust/:accountId', async (req, res) => {
 
     const sales = salesData?.Sale || []
 
-    // 3) Build sold qty map by itemID
     const soldMap = {}
 
     for (const sale of sales) {
@@ -92,7 +94,6 @@ router.get('/reports/dust/:accountId', async (req, res) => {
       }
     }
 
-    // 4) Build dust rows
     const rows = []
 
     for (const item of items) {
@@ -147,8 +148,56 @@ router.get('/reports/dust/:accountId', async (req, res) => {
       }
     }
 
-    // 5) Sort biggest dust qty first
     rows.sort((a, b) => b.qtyInSelectedStore - a.qtyInSelectedStore)
+
+    if (format === 'csv') {
+      const headers = [
+        'Item ID',
+        'Description',
+        'Custom SKU',
+        'UPC',
+        'West Qty',
+        'South Qty',
+        'Total Qty',
+        'Qty In Selected Store',
+        'Qty Sold'
+      ]
+
+      const escapeCsv = (value) => {
+        const stringValue = String(value ?? '')
+        if (stringValue.includes('"') || stringValue.includes(',') || stringValue.includes('\n')) {
+          return `"${stringValue.replace(/"/g, '""')}"`
+        }
+        return stringValue
+      }
+
+      const csvRows = [
+        headers.join(','),
+        ...rows.map(row =>
+          [
+            row.itemId,
+            row.description,
+            row.customSku,
+            row.upc,
+            row.westQty,
+            row.southQty,
+            row.totalQty,
+            row.qtyInSelectedStore,
+            row.qtySold
+          ].map(escapeCsv).join(',')
+        )
+      ]
+
+      const csv = csvRows.join('\n')
+
+      res.setHeader('Content-Type', 'text/csv')
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="dust-report-${store}-${days}days.csv"`
+      )
+
+      return res.send(csv)
+    }
 
     return res.json({
       success: true,
@@ -157,7 +206,8 @@ router.get('/reports/dust/:accountId', async (req, res) => {
         accountId,
         store,
         days: Number(days),
-        startDate: startIso
+        startDate: startIso,
+        format
       },
       count: rows.length,
       rows
