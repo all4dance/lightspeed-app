@@ -436,4 +436,187 @@ router.get('/reports/test-item/:accountId/:itemId', async (req, res) => {
   }
 })
 
+// TRANSFERS REPORT
+router.get('/reports/transfers/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params
+    const { days = 30, minSales = 1, format = 'json' } = req.query
+
+    if (!['json', 'csv'].includes(format)) {
+      return res.status(400).json({
+        error: 'Invalid format. Use json or csv.'
+      })
+    }
+
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - Number(days))
+    const startIso = startDate.toISOString()
+
+    const itemsData = await apiRequest(
+      accountId,
+      'Item.json?load_relations=["ItemShops"]&limit=10000'
+    )
+
+    const items = getItemArray(itemsData)
+
+    // Build sales map BY STORE
+    const saleLinesData = await apiRequest(
+      accountId,
+      `SaleLine.json?timeStamp=>,${encodeURIComponent(startIso)}&limit=10000`
+    )
+
+    const saleLines = Array.isArray(saleLinesData?.SaleLine)
+      ? saleLinesData.SaleLine
+      : saleLinesData?.SaleLine
+        ? [saleLinesData.SaleLine]
+        : []
+
+    const soldMapWest = {}
+    const soldMapSouth = {}
+
+    for (const line of saleLines) {
+      const itemId = String(line.itemID || '').trim()
+      const shopId = String(line.shopID || '').trim()
+
+      if (!itemId) continue
+
+      // Skip non-normal sales
+      if (String(line.isLayaway) === 'true') continue
+      if (String(line.isSpecialOrder) === 'true') continue
+      if (String(line.isWorkorder) === 'true') continue
+
+      const qty = Number(line.unitQuantity || 0)
+
+      if (shopId === STORE_MAP.west) {
+        if (!soldMapWest[itemId]) soldMapWest[itemId] = 0
+        soldMapWest[itemId] += qty
+      }
+
+      if (shopId === STORE_MAP.south) {
+        if (!soldMapSouth[itemId]) soldMapSouth[itemId] = 0
+        soldMapSouth[itemId] += qty
+      }
+    }
+
+    const rows = []
+
+    for (const item of items) {
+      const itemId = String(item.itemID || '').trim()
+      if (!itemId) continue
+
+      const systemId = item.systemSku || ''
+      const description = item.description || ''
+      const customSku = item.customSku || ''
+      const upc = item.upc || ''
+
+      const { westQty, southQty } = getStoreQuantities(item)
+
+      const westSold = Number(soldMapWest[itemId] || 0)
+      const southSold = Number(soldMapSouth[itemId] || 0)
+
+      // 🔥 TRANSFER LOGIC
+
+      // Move WEST → SOUTH
+      if (
+        westQty > 0 &&
+        southSold >= Number(minSales) &&
+        southQty === 0
+      ) {
+        rows.push({
+          direction: 'WEST → SOUTH',
+          itemId,
+          systemId,
+          description,
+          customSku,
+          upc,
+          westQty,
+          southQty,
+          westSold,
+          southSold
+        })
+      }
+
+      // Move SOUTH → WEST
+      if (
+        southQty > 0 &&
+        westSold >= Number(minSales) &&
+        westQty === 0
+      ) {
+        rows.push({
+          direction: 'SOUTH → WEST',
+          itemId,
+          systemId,
+          description,
+          customSku,
+          upc,
+          westQty,
+          southQty,
+          westSold,
+          southSold
+        })
+      }
+    }
+
+    rows.sort((a, b) => b.southSold + b.westSold - (a.southSold + a.westSold))
+
+    if (format === 'csv') {
+      const headers = [
+        'Direction',
+        'Item ID',
+        'System ID',
+        'Description',
+        'Custom SKU',
+        'UPC',
+        'West Qty',
+        'South Qty',
+        'West Sold',
+        'South Sold'
+      ]
+
+      const csvRows = [
+        headers.join(','),
+        ...rows.map(row =>
+          [
+            row.direction,
+            row.itemId,
+            row.systemId,
+            row.description,
+            row.customSku,
+            row.upc,
+            row.westQty,
+            row.southQty,
+            row.westSold,
+            row.southSold
+          ].map(escapeCsv).join(',')
+        )
+      ]
+
+      res.setHeader('Content-Type', 'text/csv')
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="transfers-${days}days.csv"`
+      )
+
+      return res.send(csvRows.join('\n'))
+    }
+
+    return res.json({
+      success: true,
+      report: 'transfers',
+      filters: {
+        accountId,
+        days: Number(days),
+        minSales: Number(minSales),
+        startDate: startIso,
+        format
+      },
+      count: rows.length,
+      rows
+    })
+  } catch (err) {
+    console.error('Transfers error:', err.message)
+    return res.status(500).json({ error: err.message })
+  }
+})
+
 module.exports = router
