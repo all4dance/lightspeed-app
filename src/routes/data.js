@@ -399,4 +399,19 @@ router.get('/reports/test-salelines/:accountId', async (req, res) => {
   }
 })
 
+router.get('/reports/test-item/:accountId/:itemId', async (req, res) => {
+  try {
+    const { accountId, itemId } = req.params
+
+    const data = await apiRequest(
+      accountId,
+      `Item/${itemId}.json?load_relations=["ItemShops"]`
+    )
+
+    res.json(data)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 module.exports = router
