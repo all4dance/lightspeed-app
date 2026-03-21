@@ -1,7 +1,5 @@
 require('dotenv').config()
 
-console.log('CLIENT ID:', process.env.LIGHTSPEED_CLIENT_ID)
-
 const express = require('express')
 
 const authRoutes = require('./routes/auth')
