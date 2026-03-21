@@ -440,7 +440,13 @@ router.get('/reports/test-item/:accountId/:itemId', async (req, res) => {
 router.get('/reports/transfers/:accountId', async (req, res) => {
   try {
     const { accountId } = req.params
-    const { days = 30, minSales = 1, format = 'json' } = req.query
+    const {
+      days = 30,
+      minSales = 1,
+      lowStock = 1,
+      sourceMinQty = 2,
+      format = 'json'
+    } = req.query
 
     if (!['json', 'csv'].includes(format)) {
       return res.status(400).json({
@@ -459,7 +465,6 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
 
     const items = getItemArray(itemsData)
 
-    // Build sales map BY STORE
     const saleLinesData = await apiRequest(
       accountId,
       `SaleLine.json?timeStamp=>,${encodeURIComponent(startIso)}&limit=10000`
@@ -475,17 +480,16 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
     const soldMapSouth = {}
 
     for (const line of saleLines) {
-      const itemId = String(line.itemID || '').trim()
-      const shopId = String(line.shopID || '').trim()
+      const itemId = String(line.itemID || line.ItemID || '').trim()
+      const shopId = String(line.shopID || line.ShopID || '').trim()
 
       if (!itemId) continue
 
-      // Skip non-normal sales
       if (String(line.isLayaway) === 'true') continue
       if (String(line.isSpecialOrder) === 'true') continue
       if (String(line.isWorkorder) === 'true') continue
 
-      const qty = Number(line.unitQuantity || 0)
+      const qty = Number(line.unitQuantity || line.UnitQuantity || line.quantity || 0)
 
       if (shopId === STORE_MAP.west) {
         if (!soldMapWest[itemId]) soldMapWest[itemId] = 0
@@ -501,63 +505,78 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
     const rows = []
 
     for (const item of items) {
-      const itemId = String(item.itemID || '').trim()
+      const itemId = String(item.itemID || item.ItemID || '').trim()
       if (!itemId) continue
 
-      const systemId = item.systemSku || ''
-      const description = item.description || ''
-      const customSku = item.customSku || ''
-      const upc = item.upc || ''
+      const systemId = item.systemSku || item.SystemSku || ''
+      const description = item.description || item.Description || ''
+      const customSku = item.customSku || item.CustomSKU || ''
+      const upc = item.upc || item.UPC || ''
 
       const { westQty, southQty } = getStoreQuantities(item)
-
       const westSold = Number(soldMapWest[itemId] || 0)
       const southSold = Number(soldMapSouth[itemId] || 0)
 
-      // 🔥 TRANSFER LOGIC
-
-      // Move WEST → SOUTH
+      // WEST needs stock, SOUTH can spare stock
       if (
-        westQty > 0 &&
-        southSold >= Number(minSales) &&
-        southQty === 0
+        westSold >= Number(minSales) &&
+        westQty <= Number(lowStock) &&
+        southQty >= Number(sourceMinQty)
       ) {
-        rows.push({
-          direction: 'WEST → SOUTH',
-          itemId,
-          systemId,
-          description,
-          customSku,
-          upc,
-          westQty,
-          southQty,
-          westSold,
-          southSold
-        })
+        const suggestedQty = Math.min(
+          southQty - Number(lowStock),
+          Math.max(1, westSold - westQty)
+        )
+
+        if (suggestedQty > 0) {
+          rows.push({
+            direction: 'SOUTH → WEST',
+            itemId,
+            systemId,
+            description,
+            customSku,
+            upc,
+            westQty,
+            southQty,
+            westSold,
+            southSold,
+            suggestedQty,
+            priorityScore: (westSold * 10) + (southQty - westQty)
+          })
+        }
       }
 
-      // Move SOUTH → WEST
+      // SOUTH needs stock, WEST can spare stock
       if (
-        southQty > 0 &&
-        westSold >= Number(minSales) &&
-        westQty === 0
+        southSold >= Number(minSales) &&
+        southQty <= Number(lowStock) &&
+        westQty >= Number(sourceMinQty)
       ) {
-        rows.push({
-          direction: 'SOUTH → WEST',
-          itemId,
-          systemId,
-          description,
-          customSku,
-          upc,
-          westQty,
-          southQty,
-          westSold,
-          southSold
-        })
+        const suggestedQty = Math.min(
+          westQty - Number(lowStock),
+          Math.max(1, southSold - southQty)
+        )
+
+        if (suggestedQty > 0) {
+          rows.push({
+            direction: 'WEST → SOUTH',
+            itemId,
+            systemId,
+            description,
+            customSku,
+            upc,
+            westQty,
+            southQty,
+            westSold,
+            southSold,
+            suggestedQty,
+            priorityScore: (southSold * 10) + (westQty - southQty)
+          })
+        }
       }
     }
 
-    rows.sort((a, b) => b.southSold + b.westSold - (a.southSold + a.westSold))
+    rows.sort((a, b) => b.priorityScore - a.priorityScore)
 
     if (format === 'csv') {
       const headers = [
@@ -570,7 +589,9 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
         'West Qty',
         'South Qty',
         'West Sold',
-        'South Sold'
+        'South Sold',
+        'Suggested Transfer Qty',
+        'Priority Score'
       ]
 
       const csvRows = [
@@ -586,7 +607,9 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
             row.westQty,
             row.southQty,
             row.westSold,
-            row.southSold
+            row.southSold,
+            row.suggestedQty,
+            row.priorityScore
           ].map(escapeCsv).join(',')
         )
       ]
@@ -607,6 +630,8 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
         accountId,
         days: Number(days),
         minSales: Number(minSales),
+        lowStock: Number(lowStock),
+        sourceMinQty: Number(sourceMinQty),
         startDate: startIso,
         format
       },
