@@ -1,11 +1,28 @@
+// src/routes/debug.js
+const express = require('express');
+const router = express.Router();
+const { apiRequest } = require('../lightspeed');  // adjust if lightspeed.js is in src/services/ or elsewhere
+
 router.get('/shops/:accountId', async (req, res) => {
   const { accountId } = req.params;
-
   try {
-    // Optional: ?limit=50 if you have many shops, but usually few
     const data = await apiRequest(accountId, 'Shop.json?limit=100');
-    res.json(data.Shop || data); // Lightspeed often wraps in { Shop: [...] } or direct array
+    res.json(data.Shop || data); // handles { Shop: [...] } or direct array
+  } catch (err) {
+    console.error('Shops fetch error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Optional: quick test for items with shops (useful for debugging QOH fields)
+router.get('/items-sample/:accountId', async (req, res) => {
+  const { accountId } = req.params;
+  try {
+    const data = await apiRequest(accountId, 'Item.json?load_relations=["ItemShops"]&limit=2');
+    res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+module.exports = router;
