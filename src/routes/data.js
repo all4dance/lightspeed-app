@@ -62,6 +62,137 @@ function escapeCsv(value) {
   return stringValue
 }
 
+function getCustomerArray(customersData) {
+  if (Array.isArray(customersData?.Customer)) return customersData.Customer
+  if (customersData?.Customer) return [customersData.Customer]
+  return []
+}
+
+function parseNumber(value) {
+  const cleaned = String(value ?? '').replace(/[^0-9.-]/g, '')
+  return cleaned ? Number(cleaned) : 0
+}
+
+function normalizeText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9%]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function parseCsvList(value) {
+  return String(value || '')
+    .split(',')
+    .map(v => v.trim())
+    .filter(Boolean)
+}
+
+function roundUpToThree(value) {
+  if (value <= 0) return 0
+  return Math.ceil(value / 3) * 3
+}
+
+function calculateOrderQty(qtySold, totalStock, brand) {
+  const rawNeed = Math.max(0, Number(qtySold || 0) - Number(totalStock || 0))
+  if (!rawNeed) return 0
+  return normalizeText(brand) === 'mondor' ? roundUpToThree(rawNeed) : rawNeed
+}
+
+function parseCustomerTags(customer) {
+  const possible = [
+    customer.tags,
+    customer.Tags,
+    customer.tag,
+    customer.Tag,
+    customer.customerTags,
+    customer.CustomerTags,
+    customer.note,
+    customer.Note
+  ]
+
+  const rawValues = []
+
+  for (const value of possible) {
+    if (!value) continue
+
+    if (Array.isArray(value)) {
+      rawValues.push(...value.map(v => String(v || '').trim()).filter(Boolean))
+      continue
+    }
+
+    if (typeof value === 'object') {
+      for (const innerValue of Object.values(value)) {
+        if (Array.isArray(innerValue)) {
+          rawValues.push(...innerValue.map(v => String(v || '').trim()).filter(Boolean))
+        } else if (innerValue && typeof innerValue !== 'object') {
+          rawValues.push(String(innerValue).trim())
+        }
+      }
+      continue
+    }
+
+    rawValues.push(...String(value).split(',').map(v => v.trim()).filter(Boolean))
+  }
+
+  return [...new Set(rawValues.filter(Boolean))]
+}
+
+function getCustomerDisplayName(customer) {
+  const first = String(customer.firstName || customer.FirstName || '').trim()
+  const last = String(customer.lastName || customer.LastName || '').trim()
+  const company = String(customer.company || customer.Company || '').trim()
+  return company || [first, last].filter(Boolean).join(' ').trim()
+}
+
+function getCustomerType(customer) {
+  return String(
+    customer.type ||
+    customer.Type ||
+    customer.customerType ||
+    customer.CustomerType ||
+    customer.typeName ||
+    customer.TypeName ||
+    ''
+  ).trim()
+}
+
+function getItemSupplier(item) {
+  return String(
+    item.vendor ||
+    item.Vendor ||
+    item.defaultVendor ||
+    item.DefaultVendor ||
+    item.vendorName ||
+    item.VendorName ||
+    item.supplier ||
+    item.Supplier ||
+    ''
+  ).trim()
+}
+
+function rowMatchesTypeFilter(customerInfo, typeMode, typeValue) {
+  if (typeMode === 'none') return true
+
+  const wanted = normalizeText(typeValue)
+  if (!wanted) return true
+
+  const valuesToCheck = [
+    customerInfo.type,
+    ...(customerInfo.tags || [])
+  ]
+    .map(v => normalizeText(v))
+    .filter(Boolean)
+
+  const matched = valuesToCheck.some(v => v.includes(wanted) || wanted.includes(v))
+
+  if (typeMode === 'exclude') return !matched
+  if (typeMode === 'include') return matched
+
+  return true
+}
+
 async function buildSoldMap(accountId, startIso, store) {
   const saleLinesData = await apiRequest(
     accountId,
@@ -734,6 +865,282 @@ router.get('/reports/debug-transfers/:accountId', async (req, res) => {
     })
   } catch (err) {
     console.error('Debug transfers error:', err.message)
+    return res.status(500).json({ error: err.message })
+  }
+})
+
+// SALES SUMMARY REPORT
+router.get('/reports/sales/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params
+
+    const {
+      dateFrom = '',
+      dateTo = '',
+      itemSearch = '',
+      category = '',
+      subcategory = '',
+      brand = '',
+      supplier = '',
+      typeMode = 'exclude',
+      typeValue = 'Studio Account 25%',
+      blankCustomerMode = 'include',
+      excludeCustomers = 'INVENTORY ADJUSTMENT',
+      format = 'json'
+    } = req.query
+
+    if (!['json', 'csv'].includes(format)) {
+      return res.status(400).json({ error: 'Invalid format. Use json or csv.' })
+    }
+
+    const itemsData = await apiRequest(
+      accountId,
+      'Item.json?load_relations=["ItemShops"]&limit=10000'
+    )
+
+    const customersData = await apiRequest(
+      accountId,
+      'Customer.json?limit=10000'
+    )
+
+    const saleLinesData = await apiRequest(
+      accountId,
+      'SaleLine.json?limit=10000'
+    )
+
+    const items = getItemArray(itemsData)
+    const customers = getCustomerArray(customersData)
+    const saleLines = Array.isArray(saleLinesData?.SaleLine)
+      ? saleLinesData.SaleLine
+      : saleLinesData?.SaleLine
+        ? [saleLinesData.SaleLine]
+        : []
+
+    const itemMap = new Map()
+    const categories = new Set()
+    const subcategories = new Set()
+    const brands = new Set()
+    const suppliers = new Set()
+
+    for (const item of items) {
+      const itemId = String(item.itemID || item.ItemID || '').trim()
+      if (!itemId) continue
+
+      const systemId = String(item.systemSku || item.SystemSku || '').trim()
+      const description = String(item.description || item.Description || '').trim()
+      const customSku = String(item.customSku || item.CustomSKU || '').trim()
+      const upc = String(item.upc || item.UPC || '').trim()
+      const brandValue = String(item.brand || item.Brand || '').trim()
+      const categoryValue = String(item.category || item.Category || '').trim()
+      const subcategoryValue = String(
+        item.subCategory1 ||
+        item.Subcategory1 ||
+        item.subcategory1 ||
+        item['Subcategory 1'] ||
+        ''
+      ).trim()
+      const supplierValue = getItemSupplier(item)
+
+      const { westQty, southQty, totalQty } = getStoreQuantities(item)
+
+      if (categoryValue) categories.add(categoryValue)
+      if (subcategoryValue) subcategories.add(subcategoryValue)
+      if (brandValue) brands.add(brandValue)
+      if (supplierValue) suppliers.add(supplierValue)
+
+      itemMap.set(itemId, {
+        itemId,
+        systemId,
+        description,
+        customSku,
+        upc,
+        brand: brandValue,
+        category: categoryValue,
+        subcategory: subcategoryValue,
+        supplier: supplierValue,
+        westStock: westQty,
+        southStock: southQty,
+        totalStock: totalQty
+      })
+    }
+
+    const customerMap = new Map()
+
+    for (const customer of customers) {
+      const customerId = String(customer.customerID || customer.CustomerID || '').trim()
+      if (!customerId) continue
+
+      customerMap.set(customerId, {
+        name: getCustomerDisplayName(customer),
+        type: getCustomerType(customer),
+        tags: parseCustomerTags(customer)
+      })
+    }
+
+    const itemSearchNorm = normalizeText(itemSearch)
+    const excludedCustomersNorm = parseCsvList(excludeCustomers).map(normalizeText)
+
+    const fromDate = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null
+    const toDate = dateTo ? new Date(`${dateTo}T23:59:59`) : null
+
+    const grouped = new Map()
+
+    for (const line of saleLines) {
+      const itemId = String(line.itemID || line.ItemID || '').trim()
+      if (!itemId) continue
+
+      if (String(line.isWorkorder) === 'true') continue
+
+      const createdAt = line.createTime || line.CreateTime || ''
+      if (!createdAt) continue
+
+      const createdDate = new Date(createdAt)
+      if (Number.isNaN(createdDate.getTime())) continue
+
+      if (fromDate && createdDate < fromDate) continue
+      if (toDate && createdDate > toDate) continue
+
+      const item = itemMap.get(itemId)
+      if (!item) continue
+
+      if (category && normalizeText(item.category) !== normalizeText(category)) continue
+      if (subcategory && normalizeText(item.subcategory) !== normalizeText(subcategory)) continue
+      if (brand && normalizeText(item.brand) !== normalizeText(brand)) continue
+      if (supplier && normalizeText(item.supplier) !== normalizeText(supplier)) continue
+
+      if (itemSearchNorm) {
+        const searchPool = [
+          item.description,
+          item.systemId,
+          item.customSku,
+          item.upc
+        ].map(normalizeText).join(' ')
+
+        if (!searchPool.includes(itemSearchNorm)) continue
+      }
+
+      const customerId = String(line.customerID || line.CustomerID || '').trim()
+      const customerInfo = customerMap.get(customerId) || {
+        name: '',
+        type: '',
+        tags: []
+      }
+
+      const customerNameNorm = normalizeText(customerInfo.name)
+
+      if (blankCustomerMode === 'exclude' && !customerNameNorm) continue
+
+      if (
+        customerNameNorm &&
+        excludedCustomersNorm.some(excluded => excluded && customerNameNorm.includes(excluded))
+      ) {
+        continue
+      }
+
+      if (!rowMatchesTypeFilter(customerInfo, typeMode, typeValue)) continue
+
+      const qty = Number(line.unitQuantity || line.UnitQuantity || line.quantity || 0)
+      if (!qty) continue
+
+      if (!grouped.has(itemId)) {
+        grouped.set(itemId, {
+          Description: item.description,
+          'System ID': item.systemId,
+          'Custom SKU': item.customSku,
+          UPC: item.upc,
+          Category: item.category,
+          Subcategory: item.subcategory,
+          Brand: item.brand,
+          Supplier: item.supplier,
+          'All 4 Dance West Stock': item.westStock,
+          'All 4 Dance South Stock': item.southStock,
+          'Total Stock': item.totalStock,
+          'Qty Sold': 0,
+          'Order Qty': 0,
+          _hasStockMatch: true
+        })
+      }
+
+      const row = grouped.get(itemId)
+      row['Qty Sold'] += qty
+    }
+
+    const rows = Array.from(grouped.values())
+      .map(row => ({
+        ...row,
+        'Order Qty': calculateOrderQty(row['Qty Sold'], row['Total Stock'], row['Brand'])
+      }))
+      .sort((a, b) => {
+        if (b['Qty Sold'] !== a['Qty Sold']) return b['Qty Sold'] - a['Qty Sold']
+        return String(a.Description).localeCompare(String(b.Description))
+      })
+
+    if (format === 'csv') {
+      const headers = [
+        'Description',
+        'System ID',
+        'Custom SKU',
+        'UPC',
+        'Category',
+        'Subcategory',
+        'Brand',
+        'Supplier',
+        'All 4 Dance West Stock',
+        'All 4 Dance South Stock',
+        'Total Stock',
+        'Qty Sold',
+        'Order Qty'
+      ]
+
+      const csvRows = [
+        headers.join(','),
+        ...rows.map(row =>
+          headers.map(header => escapeCsv(row[header] ?? '')).join(',')
+        )
+      ]
+
+      res.setHeader('Content-Type', 'text/csv')
+      res.setHeader(
+        'Content-Disposition',
+        'attachment; filename="sales-report.csv"'
+      )
+
+      return res.send(csvRows.join('\n'))
+    }
+
+    return res.json({
+      success: true,
+      report: 'sales',
+      filters: {
+        accountId,
+        dateFrom,
+        dateTo,
+        itemSearch,
+        category,
+        subcategory,
+        brand,
+        supplier,
+        typeMode,
+        typeValue,
+        blankCustomerMode,
+        excludeCustomers,
+        format
+      },
+      filterOptions: {
+        categories: [...categories].sort((a, b) => a.localeCompare(b)),
+        subcategories: [...subcategories].sort((a, b) => a.localeCompare(b)),
+        brands: [...brands].sort((a, b) => a.localeCompare(b)),
+        suppliers: [...suppliers].sort((a, b) => a.localeCompare(b))
+      },
+      stats: {
+        matchingProducts: rows.length,
+        totalQtySold: rows.reduce((sum, row) => sum + Number(row['Qty Sold'] || 0), 0),
+        productsWithStockMatch: rows.filter(row => row._hasStockMatch).length
+      },
+      rows
+    })
+  } catch (err) {
+    console.error('Sales report error:', err.message)
     return res.status(500).json({ error: err.message })
   }
 })
