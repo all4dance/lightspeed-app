@@ -485,9 +485,8 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
 
       if (!itemId) continue
 
-      if (String(line.isLayaway) === 'true') continue
-      if (String(line.isSpecialOrder) === 'true') continue
-      if (String(line.isWorkorder) === 'true') continue
+      // Keep everything except weird internal stuff
+if (String(line.isWorkorder) === 'true') continue
 
       const qty = Number(line.unitQuantity || line.UnitQuantity || line.quantity || 0)
 
