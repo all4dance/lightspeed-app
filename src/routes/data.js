@@ -436,15 +436,13 @@ router.get('/reports/test-item/:accountId/:itemId', async (req, res) => {
   }
 })
 
-// TRANSFERS REPORT
+// TRANSFER OPPORTUNITIES REPORT
 router.get('/reports/transfers/:accountId', async (req, res) => {
   try {
     const { accountId } = req.params
     const {
-      days = 30,
+      days = 90,
       minSales = 1,
-      lowStock = 1,
-      sourceMinQty = 2,
       format = 'json'
     } = req.query
 
@@ -513,70 +511,48 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
       const customSku = item.customSku || item.CustomSKU || ''
       const upc = item.upc || item.UPC || ''
 
-      const { westQty, southQty } = getStoreQuantities(item)
+      const { westQty, southQty, totalQty } = getStoreQuantities(item)
       const westSold = Number(soldMapWest[itemId] || 0)
       const southSold = Number(soldMapSouth[itemId] || 0)
 
-      // WEST needs stock, SOUTH can spare stock
-      if (
-        westSold >= Number(minSales) &&
-        westQty <= Number(lowStock) &&
-        southQty >= Number(sourceMinQty)
-      ) {
-        const suggestedQty = Math.min(
-          southQty - Number(lowStock),
-          Math.max(1, westSold - westQty)
-        )
-
-        if (suggestedQty > 0) {
-          rows.push({
-            direction: 'SOUTH → WEST',
-            itemId,
-            systemId,
-            description,
-            customSku,
-            upc,
-            westQty,
-            southQty,
-            westSold,
-            southSold,
-            suggestedQty,
-            priorityScore: (westSold * 10) + (southQty - westQty)
-          })
-        }
+      // SOUTH has stock, WEST is selling
+      if (westSold >= Number(minSales) && southQty > 0) {
+        rows.push({
+          direction: 'SOUTH → WEST',
+          itemId,
+          systemId,
+          description,
+          customSku,
+          upc,
+          westQty,
+          southQty,
+          totalQty,
+          westSold,
+          southSold,
+          opportunityScore: (westSold * 10) + southQty
+        })
       }
 
-      // SOUTH needs stock, WEST can spare stock
-      if (
-        southSold >= Number(minSales) &&
-        southQty <= Number(lowStock) &&
-        westQty >= Number(sourceMinQty)
-      ) {
-        const suggestedQty = Math.min(
-          westQty - Number(lowStock),
-          Math.max(1, southSold - southQty)
-        )
-
-        if (suggestedQty > 0) {
-          rows.push({
-            direction: 'WEST → SOUTH',
-            itemId,
-            systemId,
-            description,
-            customSku,
-            upc,
-            westQty,
-            southQty,
-            westSold,
-            southSold,
-            suggestedQty,
-            priorityScore: (southSold * 10) + (westQty - southQty)
-          })
-        }
+      // WEST has stock, SOUTH is selling
+      if (southSold >= Number(minSales) && westQty > 0) {
+        rows.push({
+          direction: 'WEST → SOUTH',
+          itemId,
+          systemId,
+          description,
+          customSku,
+          upc,
+          westQty,
+          southQty,
+          totalQty,
+          westSold,
+          southSold,
+          opportunityScore: (southSold * 10) + westQty
+        })
       }
     }
 
-    rows.sort((a, b) => b.priorityScore - a.priorityScore)
+    rows.sort((a, b) => b.opportunityScore - a.opportunityScore)
 
     if (format === 'csv') {
       const headers = [
@@ -588,10 +564,10 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
         'UPC',
         'West Qty',
         'South Qty',
+        'Total Qty',
         'West Sold',
         'South Sold',
-        'Suggested Transfer Qty',
-        'Priority Score'
+        'Opportunity Score'
       ]
 
       const csvRows = [
@@ -606,10 +582,10 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
             row.upc,
             row.westQty,
             row.southQty,
+            row.totalQty,
             row.westSold,
             row.southSold,
-            row.suggestedQty,
-            row.priorityScore
+            row.opportunityScore
           ].map(escapeCsv).join(',')
         )
       ]
@@ -617,7 +593,7 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
       res.setHeader('Content-Type', 'text/csv')
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="transfers-${days}days.csv"`
+        `attachment; filename="transfer-opportunities-${days}days.csv"`
       )
 
       return res.send(csvRows.join('\n'))
@@ -630,8 +606,6 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
         accountId,
         days: Number(days),
         minSales: Number(minSales),
-        lowStock: Number(lowStock),
-        sourceMinQty: Number(sourceMinQty),
         startDate: startIso,
         format
       },
@@ -639,7 +613,7 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
       rows
     })
   } catch (err) {
-    console.error('Transfers error:', err.message)
+    console.error('Transfer opportunities error:', err.message)
     return res.status(500).json({ error: err.message })
   }
 })
