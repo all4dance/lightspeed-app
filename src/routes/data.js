@@ -688,5 +688,55 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
   }
 })
 
+router.get('/reports/debug-transfers/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params
+    const { days = 90 } = req.query
+
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - Number(days))
+    const startIso = startDate.toISOString()
+
+    const itemsData = await apiRequest(
+      accountId,
+      'Item.json?load_relations=["ItemShops"]&limit=5'
+    )
+
+    const saleLinesData = await apiRequest(
+      accountId,
+      `SaleLine.json?timeStamp=>,${encodeURIComponent(startIso)}&limit=20`
+    )
+
+    const items = getItemArray(itemsData)
+    const saleLines = Array.isArray(saleLinesData?.SaleLine)
+      ? saleLinesData.SaleLine
+      : saleLinesData?.SaleLine
+        ? [saleLinesData.SaleLine]
+        : []
+
+    return res.json({
+      storeMap: STORE_MAP,
+      itemCount: items.length,
+      saleLineCount: saleLines.length,
+      sampleSaleLines: saleLines.slice(0, 5).map(line => ({
+        itemID: line.itemID || line.ItemID,
+        shopID: line.shopID || line.ShopID,
+        unitQuantity: line.unitQuantity || line.UnitQuantity || line.quantity,
+        timeStamp: line.timeStamp || line.TimeStamp
+      })),
+      sampleItems: items.slice(0, 3).map(item => ({
+        itemID: item.itemID || item.ItemID,
+        systemSku: item.systemSku || item.SystemSku,
+        itemShops: getItemShops(item).map(shop => ({
+          shopID: shop.shopID || shop.ShopID,
+          qoh: shop.qoh || shop.QOH || shop.quantity
+        }))
+      }))
+    })
+  } catch (err) {
+    console.error('Debug transfers error:', err.message)
+    return res.status(500).json({ error: err.message })
+  }
+})
 
 module.exports = router
