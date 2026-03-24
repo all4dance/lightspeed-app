@@ -442,7 +442,9 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
     const { accountId } = req.params
     const {
       days = 90,
-      minSales = 1,
+      minSales = 2,
+      minScore = 8,
+      top = 0,
       format = 'json'
     } = req.query
 
@@ -515,48 +517,108 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
       const westSold = Number(soldMapWest[itemId] || 0)
       const southSold = Number(soldMapSouth[itemId] || 0)
 
-      // SOUTH has stock, WEST is selling
-      if (westSold >= Number(minSales) && southQty > 0) {
-        rows.push({
-          direction: 'SOUTH → WEST',
-          itemId,
-          systemId,
-          description,
-          customSku,
-          upc,
-          westQty,
-          southQty,
-          totalQty,
-          westSold,
-          southSold,
-          opportunityScore: (westSold * 10) + southQty
-        })
+      let direction = ''
+      let sourceStore = ''
+      let destinationStore = ''
+      let sourceQty = 0
+      let destinationSales = 0
+
+      const westNeedsStock = westSold >= Number(minSales) && southQty > 0
+      const southNeedsStock = southSold >= Number(minSales) && westQty > 0
+
+      if (!westNeedsStock && !southNeedsStock) continue
+
+      if (westNeedsStock && southNeedsStock) {
+        if (westSold > southSold) {
+          direction = 'SOUTH → WEST'
+          sourceStore = 'south'
+          destinationStore = 'west'
+          sourceQty = southQty
+          destinationSales = westSold
+        } else if (southSold > westSold) {
+          direction = 'WEST → SOUTH'
+          sourceStore = 'west'
+          destinationStore = 'south'
+          sourceQty = westQty
+          destinationSales = southSold
+        } else {
+          if (southQty > westQty) {
+            direction = 'SOUTH → WEST'
+            sourceStore = 'south'
+            destinationStore = 'west'
+            sourceQty = southQty
+            destinationSales = westSold
+          } else {
+            direction = 'WEST → SOUTH'
+            sourceStore = 'west'
+            destinationStore = 'south'
+            sourceQty = westQty
+            destinationSales = southSold
+          }
+        }
+      } else if (westNeedsStock) {
+        direction = 'SOUTH → WEST'
+        sourceStore = 'south'
+        destinationStore = 'west'
+        sourceQty = southQty
+        destinationSales = westSold
+      } else if (southNeedsStock) {
+        direction = 'WEST → SOUTH'
+        sourceStore = 'west'
+        destinationStore = 'south'
+        sourceQty = westQty
+        destinationSales = southSold
       }
 
-      // WEST has stock, SOUTH is selling
-      if (southSold >= Number(minSales) && westQty > 0) {
-        rows.push({
-          direction: 'WEST → SOUTH',
-          itemId,
-          systemId,
-          description,
-          customSku,
-          upc,
-          westQty,
-          southQty,
-          totalQty,
-          westSold,
-          southSold,
-          opportunityScore: (southSold * 10) + westQty
-        })
-      }
+      const suggestedTransferQty = Math.min(
+        sourceQty,
+        Math.max(1, Math.ceil(destinationSales * 0.5))
+      )
+
+      const opportunityScore = (destinationSales * 2) + Math.min(sourceQty, 5)
+
+      if (suggestedTransferQty < 1) continue
+      if (opportunityScore < Number(minScore)) continue
+
+      rows.push({
+        direction,
+        sourceStore,
+        destinationStore,
+        itemId,
+        systemId,
+        description,
+        customSku,
+        upc,
+        westQty,
+        southQty,
+        totalQty,
+        westSold,
+        southSold,
+        destinationSales,
+        sourceQty,
+        suggestedTransferQty,
+        opportunityScore
+      })
     }
 
-    rows.sort((a, b) => b.opportunityScore - a.opportunityScore)
+    rows.sort((a, b) => {
+      if (b.opportunityScore !== a.opportunityScore) {
+        return b.opportunityScore - a.opportunityScore
+      }
+      return b.suggestedTransferQty - a.suggestedTransferQty
+    })
+
+    rows.forEach((row, index) => {
+      row.priorityRank = index + 1
+    })
+
+    const finalRows = Number(top) > 0 ? rows.slice(0, Number(top)) : rows
 
     if (format === 'csv') {
       const headers = [
+        'Priority Rank',
         'Direction',
+        'Suggested Transfer Qty',
         'Item ID',
         'System ID',
         'Description',
@@ -567,14 +629,18 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
         'Total Qty',
         'West Sold',
         'South Sold',
+        'Destination Sales',
+        'Source Qty',
         'Opportunity Score'
       ]
 
       const csvRows = [
         headers.join(','),
-        ...rows.map(row =>
+        ...finalRows.map(row =>
           [
+            row.priorityRank,
             row.direction,
+            row.suggestedTransferQty,
             row.itemId,
             row.systemId,
             row.description,
@@ -585,6 +651,8 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
             row.totalQty,
             row.westSold,
             row.southSold,
+            row.destinationSales,
+            row.sourceQty,
             row.opportunityScore
           ].map(escapeCsv).join(',')
         )
@@ -606,11 +674,13 @@ router.get('/reports/transfers/:accountId', async (req, res) => {
         accountId,
         days: Number(days),
         minSales: Number(minSales),
+        minScore: Number(minScore),
+        top: Number(top),
         startDate: startIso,
         format
       },
-      count: rows.length,
-      rows
+      count: finalRows.length,
+      rows: finalRows
     })
   } catch (err) {
     console.error('Transfer opportunities error:', err.message)
