@@ -1006,11 +1006,6 @@ if (!isFiltersOnly && dateFrom && dateTo) {
     'Item.json?load_relations=["ItemShops"]'
   )
 
-  customers = await apiRequestAll(
-    accountId,
-    'Customer.json'
-  )
-
   const fromIso = new Date(`${dateFrom}T00:00:00`).toISOString()
   const toIso = new Date(`${dateTo}T23:59:59`).toISOString()
 
@@ -1018,6 +1013,8 @@ if (!isFiltersOnly && dateFrom && dateTo) {
     accountId,
     `SaleLine.json?createTime=>,${encodeURIComponent(fromIso)}&createTime=<,${encodeURIComponent(toIso)}`
   )
+
+  customers = []
 }
     
 
@@ -1247,21 +1244,27 @@ if (categoryValue && subcategoryValue) {
       }
 
       const customerId = String(line.customerID || line.CustomerID || '').trim()
-      const customerInfo = customerMap.get(customerId) || {
-        name: '',
-        type: '',
-        tags: []
-      }
+const customerInfo = customerMap.get(customerId) || {
+  name: '',
+  type: '',
+  tags: []
+}
 
-      const customerNameNorm = normalizeText(customerInfo.name)
+const customerNameNorm = normalizeText(customerInfo.name)
 
-      if (blankCustomerMode === 'exclude' && !customerNameNorm) continue
+if (customers.length > 0) {
+  if (blankCustomerMode === 'exclude' && !customerNameNorm) continue
 
-      if (
-        customerNameNorm &&
-        excludedCustomersNorm.some(excluded => excluded && customerNameNorm.includes(excluded))
-      ) {
-        continue
+  if (
+    customerNameNorm &&
+    excludedCustomersNorm.some(excluded => excluded && customerNameNorm.includes(excluded))
+  ) {
+    continue
+  }
+
+  if (!rowMatchesTypeFilter(customerInfo, typeMode, typeValue)) continue
+}
+
       }
 
       if (!rowMatchesTypeFilter(customerInfo, typeMode, typeValue)) continue
