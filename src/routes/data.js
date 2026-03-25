@@ -1030,6 +1030,42 @@ router.get('/reports/sales/:accountId', async (req, res) => {
 
     const isFiltersOnly = String(filtersOnly) === 'true'
 
+    if (isFiltersOnly) {
+  return res.json({
+    success: true,
+    report: 'sales',
+    filters: {
+      accountId,
+      dateFrom,
+      dateTo,
+      itemSearch,
+      category,
+      subcategory,
+      brand,
+      supplier,
+      typeMode,
+      typeValue,
+      blankCustomerMode,
+      excludeCustomers,
+      filtersOnly,
+      format
+    },
+    filterOptions: {
+      categories: [],
+      subcategories: [],
+      brands: [],
+      suppliers: [],
+      subcategoriesByCategory: {}
+    },
+    stats: {
+      matchingProducts: 0,
+      totalQtySold: 0,
+      productsWithStockMatch: 0
+    },
+    rows: []
+  })
+}
+
 const meta = await getSalesFilterMetadata(accountId)
 let items = []
 const categoriesList = meta.categoriesList
