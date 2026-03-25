@@ -1071,13 +1071,18 @@ if (!isFiltersOnly && dateFrom && dateTo) {
   items = await getSalesItems(accountId)
 
   const fromIso = new Date(`${dateFrom}T00:00:00`).toISOString()
-  const toIso = new Date(`${dateTo}T23:59:59`).toISOString()
+const toIso = new Date(`${dateTo}T23:59:59`).toISOString()
 
-  saleLines = await apiRequestAll(
-    accountId,
-    `SaleLine.json?createTime=>,${encodeURIComponent(fromIso)}&createTime=<,${encodeURIComponent(toIso)}`
-  )
-}
+const saleLinesData = await apiRequest(
+  accountId,
+  `SaleLine.json?createTime=>,${encodeURIComponent(fromIso)}&createTime=<,${encodeURIComponent(toIso)}&limit=200`
+)
+
+saleLines = Array.isArray(saleLinesData?.SaleLine)
+  ? saleLinesData.SaleLine
+  : saleLinesData?.SaleLine
+    ? [saleLinesData.SaleLine]
+    : []
 
     const categoryMap = new Map()
 for (const categoryRow of categoriesList) {
