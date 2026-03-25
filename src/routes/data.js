@@ -297,35 +297,9 @@ router.get('/reports/dust/:accountId', async (req, res) => {
     startDate.setDate(startDate.getDate() - Number(days))
     const startIso = startDate.toISOString()
 
-    const itemsData = await apiRequest(
+   const itemsData = await apiRequest(
   accountId,
   'Item.json?load_relations=["ItemShops"]&limit=10000'
-)
-
-const customersData = await apiRequest(
-  accountId,
-  'Customer.json?limit=10000'
-)
-
-const categoriesData = await apiRequest(
-  accountId,
-  'Category.json?limit=10000'
-)
-
-const manufacturersData = await apiRequest(
-  accountId,
-  'Manufacturer.json?limit=10000'
-)
-
-const vendorsData = await apiRequest(
-  accountId,
-  'Vendor.json?limit=10000'
-)
-
-const saleLinesData = await apiRequest(
-  accountId,
-  'SaleLine.json?limit=10000'
-)
 
     const items = getItemArray(itemsData)
     const soldMap = await buildSoldMap(accountId, startIso, store)
@@ -936,20 +910,35 @@ router.get('/reports/sales/:accountId', async (req, res) => {
       return res.status(400).json({ error: 'Invalid format. Use json or csv.' })
     }
 
-    const itemsData = await apiRequest(
-      accountId,
-      'Item.json?load_relations=["ItemShops"]&limit=10000'
-    )
+   const itemsData = await apiRequest(
+  accountId,
+  'Item.json?load_relations=["ItemShops"]&limit=10000'
+)
 
-    const customersData = await apiRequest(
-      accountId,
-      'Customer.json?limit=10000'
-    )
+const customersData = await apiRequest(
+  accountId,
+  'Customer.json?limit=10000'
+)
 
-    const saleLinesData = await apiRequest(
-      accountId,
-      'SaleLine.json?limit=10000'
-    )
+const categoriesData = await apiRequest(
+  accountId,
+  'Category.json?limit=10000'
+)
+
+const manufacturersData = await apiRequest(
+  accountId,
+  'Manufacturer.json?limit=10000'
+)
+
+const vendorsData = await apiRequest(
+  accountId,
+  'Vendor.json?limit=10000'
+)
+
+const saleLinesData = await apiRequest(
+  accountId,
+  'SaleLine.json?limit=10000'
+)
 
     const items = getItemArray(itemsData)
 const customers = getCustomerArray(customersData)
