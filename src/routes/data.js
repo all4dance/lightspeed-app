@@ -68,6 +68,7 @@ async function apiRequestAll(accountId, endpointBase) {
         nextEndpoint = cleaned
       }
     }
+    await new Promise(resolve => setTimeout(resolve, 150))
   }
 
   return allRows
@@ -976,19 +977,11 @@ router.get('/reports/sales/:accountId', async (req, res) => {
       return res.status(400).json({ error: 'Invalid format. Use json or csv.' })
     }
 
-    const items = await apiRequestAll(
+    const isFiltersOnly = String(filtersOnly) === 'true'
+
+const items = await apiRequestAll(
   accountId,
   'Item.json?load_relations=["ItemShops"]'
-)
-
-const customers = await apiRequestAll(
-  accountId,
-  'Customer.json'
-)
-
-const departmentsList = await apiRequestAll(
-  accountId,
-  'Department.json'
 )
 
 const categoriesList = await apiRequestAll(
@@ -1006,10 +999,22 @@ const vendorsList = await apiRequestAll(
   'Vendor.json'
 )
 
-const saleLines = await apiRequestAll(
-  accountId,
-  'SaleLine.json'
-)
+const departmentsList = []
+
+let customers = []
+let saleLines = []
+
+if (!isFiltersOnly && dateFrom && dateTo) {
+  customers = await apiRequestAll(
+    accountId,
+    'Customer.json'
+  )
+
+  saleLines = await apiRequestAll(
+    accountId,
+    'SaleLine.json'
+  )
+}
     
 
     const departmentMap = new Map()
@@ -1130,7 +1135,7 @@ if (categoryValue && subcategoryValue) {
       })
     }
 
-    if (String(filtersOnly) === 'true' || !dateFrom || !dateTo) {
+    if (isFiltersOnly || !dateFrom || !dateTo) {
       return res.json({
         success: true,
         report: 'sales',
