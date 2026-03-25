@@ -13,6 +13,43 @@ function getItemArray(itemsData) {
   return []
 }
 
+async function apiRequestAll(accountId, endpointBase) {
+  let allRows = []
+  let offset = 0
+  const limit = 1000
+
+  while (true) {
+    const separator = endpointBase.includes('?') ? '&' : '?'
+    const endpoint = `${endpointBase}${separator}limit=${limit}&offset=${offset}`
+
+    const data = await apiRequest(accountId, endpoint)
+
+    let rows = []
+
+    if (Array.isArray(data?.Item)) rows = data.Item
+    else if (data?.Item) rows = [data.Item]
+    else if (Array.isArray(data?.SaleLine)) rows = data.SaleLine
+    else if (data?.SaleLine) rows = [data.SaleLine]
+    else if (Array.isArray(data?.Customer)) rows = data.Customer
+    else if (data?.Customer) rows = [data.Customer]
+    else if (Array.isArray(data?.Category)) rows = data.Category
+    else if (data?.Category) rows = [data.Category]
+    else if (Array.isArray(data?.Manufacturer)) rows = data.Manufacturer
+    else if (data?.Manufacturer) rows = [data.Manufacturer]
+    else if (Array.isArray(data?.Vendor)) rows = data.Vendor
+    else if (data?.Vendor) rows = [data.Vendor]
+    else if (Array.isArray(data?.Department)) rows = data.Department
+    else if (data?.Department) rows = [data.Department]
+
+    allRows = allRows.concat(rows)
+
+    if (rows.length < limit) break
+    offset += limit
+  }
+
+  return allRows
+}
+
 function getItemShops(item) {
   const itemShopsContainer = item.ItemShops
 
@@ -916,53 +953,41 @@ router.get('/reports/sales/:accountId', async (req, res) => {
       return res.status(400).json({ error: 'Invalid format. Use json or csv.' })
     }
 
-    const itemsData = await apiRequest(
-      accountId,
-      'Item.json?load_relations=["ItemShops"]&limit=10000'
-    )
+    const items = await apiRequestAll(
+  accountId,
+  'Item.json?load_relations=["ItemShops"]'
+)
 
-    const customersData = await apiRequest(
-      accountId,
-      'Customer.json?limit=10000'
-    )
+const customers = await apiRequestAll(
+  accountId,
+  'Customer.json'
+)
 
-    const departmentsData = await apiRequest(
-      accountId,
-      'Department.json?limit=10000'
-    )
+const departmentsList = await apiRequestAll(
+  accountId,
+  'Department.json'
+)
 
-    const categoriesData = await apiRequest(
-      accountId,
-      'Category.json?limit=10000'
-    )
+const categoriesList = await apiRequestAll(
+  accountId,
+  'Category.json'
+)
 
-    const manufacturersData = await apiRequest(
-      accountId,
-      'Manufacturer.json?limit=10000'
-    )
+const manufacturersList = await apiRequestAll(
+  accountId,
+  'Manufacturer.json'
+)
 
-    const vendorsData = await apiRequest(
-      accountId,
-      'Vendor.json?limit=10000'
-    )
+const vendorsList = await apiRequestAll(
+  accountId,
+  'Vendor.json'
+)
 
-    const saleLinesData = await apiRequest(
-      accountId,
-      'SaleLine.json?limit=10000'
-    )
-
-    const items = getItemArray(itemsData)
-    const customers = getCustomerArray(customersData)
-    const departmentsList = getDepartmentArray(departmentsData)
-    const categoriesList = getCategoryArray(categoriesData)
-    const manufacturersList = getManufacturerArray(manufacturersData)
-    const vendorsList = getVendorArray(vendorsData)
-
-    const saleLines = Array.isArray(saleLinesData?.SaleLine)
-      ? saleLinesData.SaleLine
-      : saleLinesData?.SaleLine
-        ? [saleLinesData.SaleLine]
-        : []
+const saleLines = await apiRequestAll(
+  accountId,
+  'SaleLine.json'
+)
+    
 
     const departmentMap = new Map()
     for (const department of departmentsList) {
