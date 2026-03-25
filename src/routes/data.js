@@ -52,12 +52,20 @@ async function apiRequestAll(accountId, endpointBase) {
     } else {
       try {
         const parsed = new URL(nextUrl)
-        nextEndpoint = `${parsed.pathname.split('/API/V3/Account/')[1]}${parsed.search}`
-      } catch (err) {
-        nextEndpoint = nextUrl.replace(/^https?:\/\/[^/]+\//, '')
-        if (nextEndpoint.startsWith('API/V3/Account/')) {
-          nextEndpoint = nextEndpoint.replace(/^API\/V3\/Account\/[^/]+\//, '')
+
+        const marker = `/API/V3/Account/${accountId}/`
+        const fullPath = `${parsed.pathname}${parsed.search}`
+        const markerIndex = fullPath.indexOf(marker)
+
+        if (markerIndex >= 0) {
+          nextEndpoint = fullPath.substring(markerIndex + marker.length)
+        } else {
+          nextEndpoint = parsed.pathname.replace(/^\/+/, '') + parsed.search
         }
+      } catch (err) {
+        let cleaned = String(nextUrl).replace(/^https?:\/\/[^/]+\//, '')
+        cleaned = cleaned.replace(/^API\/V3\/Account\/[^/]+\//, '')
+        nextEndpoint = cleaned
       }
     }
   }
