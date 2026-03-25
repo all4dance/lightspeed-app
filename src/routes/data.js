@@ -1079,13 +1079,6 @@ if (!isFiltersOnly && dateFrom && dateTo) {
   )
 }
 
-    const departmentMap = new Map()
-    for (const department of departmentsList) {
-      const id = String(department.departmentID || department.DepartmentID || '').trim()
-      const name = String(department.name || department.Name || '').trim()
-      if (id) departmentMap.set(id, name)
-    }
-
     const categoryMap = new Map()
 for (const categoryRow of categoriesList) {
   const id = String(categoryRow.categoryID || categoryRow.CategoryID || '').trim()
