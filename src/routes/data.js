@@ -1011,9 +1011,12 @@ if (!isFiltersOnly && dateFrom && dateTo) {
     'Customer.json'
   )
 
+  const fromIso = new Date(`${dateFrom}T00:00:00`).toISOString()
+  const toIso = new Date(`${dateTo}T23:59:59`).toISOString()
+
   saleLines = await apiRequestAll(
     accountId,
-    'SaleLine.json'
+    `SaleLine.json?createTime=>,${encodeURIComponent(fromIso)}&createTime=<,${encodeURIComponent(toIso)}`
   )
 }
     
@@ -1223,9 +1226,6 @@ if (categoryValue && subcategoryValue) {
 
       const createdDate = new Date(createdAt)
       if (Number.isNaN(createdDate.getTime())) continue
-
-      if (createdDate < fromDate) continue
-      if (createdDate > toDate) continue
 
       const item = itemMap.get(itemId)
       if (!item) continue
