@@ -1265,10 +1265,6 @@ if (customers.length > 0) {
   if (!rowMatchesTypeFilter(customerInfo, typeMode, typeValue)) continue
 }
 
-      }
-
-      if (!rowMatchesTypeFilter(customerInfo, typeMode, typeValue)) continue
-
       const qty = Number(line.unitQuantity || line.UnitQuantity || line.quantity || 0)
       if (!qty) continue
 
