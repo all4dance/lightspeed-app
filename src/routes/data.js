@@ -1070,7 +1070,7 @@ let saleLines = []
 if (!isFiltersOnly && dateFrom && dateTo) {
   items = await getSalesItems(accountId)
 
-  const fromIso = new Date(`${dateFrom}T00:00:00`).toISOString()
+const fromIso = new Date(`${dateFrom}T00:00:00`).toISOString()
 const toIso = new Date(`${dateTo}T23:59:59`).toISOString()
 
 const saleLinesData = await apiRequest(
@@ -1083,7 +1083,7 @@ saleLines = Array.isArray(saleLinesData?.SaleLine)
   : saleLinesData?.SaleLine
     ? [saleLinesData.SaleLine]
     : []
-
+}
     const categoryMap = new Map()
 for (const categoryRow of categoriesList) {
   const id = String(categoryRow.categoryID || categoryRow.CategoryID || '').trim()
