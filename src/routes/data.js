@@ -91,20 +91,27 @@ async function getSalesFilterMetadata(accountId) {
     return SALES_FILTER_CACHE.data
   }
 
-  const categoriesList = await apiRequestAll(
-    accountId,
-    'Category.json'
-  )
+  const categoriesData = await apiRequest(accountId, 'Category.json')
+const manufacturersData = await apiRequest(accountId, 'Manufacturer.json')
+const vendorsData = await apiRequest(accountId, 'Vendor.json')
 
-  const manufacturersList = await apiRequestAll(
-    accountId,
-    'Manufacturer.json'
-  )
+const categoriesList = Array.isArray(categoriesData?.Category)
+  ? categoriesData.Category
+  : categoriesData?.Category
+    ? [categoriesData.Category]
+    : []
 
-  const vendorsList = await apiRequestAll(
-    accountId,
-    'Vendor.json'
-  )
+const manufacturersList = Array.isArray(manufacturersData?.Manufacturer)
+  ? manufacturersData.Manufacturer
+  : manufacturersData?.Manufacturer
+    ? [manufacturersData.Manufacturer]
+    : []
+
+const vendorsList = Array.isArray(vendorsData?.Vendor)
+  ? vendorsData.Vendor
+  : vendorsData?.Vendor
+    ? [vendorsData.Vendor]
+    : []
 
   const data = {
     categoriesList,
