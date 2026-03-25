@@ -1,5 +1,12 @@
 const express = require('express')
 const router = express.Router()
+
+const SALES_META_CACHE = {
+  fetchedAt: 0,
+  ttlMs: 10 * 60 * 1000, // 10 minutes
+  data: null
+}
+
 const { apiRequest } = require('../lightspeed')
 
 const STORE_MAP = {
@@ -72,6 +79,49 @@ async function apiRequestAll(accountId, endpointBase) {
   }
 
   return allRows
+}
+
+async function getSalesMetadata(accountId) {
+  const now = Date.now()
+
+  if (
+    SALES_META_CACHE.data &&
+    now - SALES_META_CACHE.fetchedAt < SALES_META_CACHE.ttlMs
+  ) {
+    return SALES_META_CACHE.data
+  }
+
+  const items = await apiRequestAll(
+    accountId,
+    'Item.json?load_relations=["ItemShops"]'
+  )
+
+  const categoriesList = await apiRequestAll(
+    accountId,
+    'Category.json'
+  )
+
+  const manufacturersList = await apiRequestAll(
+    accountId,
+    'Manufacturer.json'
+  )
+
+  const vendorsList = await apiRequestAll(
+    accountId,
+    'Vendor.json'
+  )
+
+  const data = {
+    items,
+    categoriesList,
+    manufacturersList,
+    vendorsList
+  }
+
+  SALES_META_CACHE.fetchedAt = now
+  SALES_META_CACHE.data = data
+
+  return data
 }
 
 function getItemShops(item) {
@@ -979,33 +1029,16 @@ router.get('/reports/sales/:accountId', async (req, res) => {
 
     const isFiltersOnly = String(filtersOnly) === 'true'
 
-const categoriesList = await apiRequestAll(
-  accountId,
-  'Category.json'
-)
+const meta = await getSalesMetadata(accountId)
+const items = meta.items
+const categoriesList = meta.categoriesList
+const manufacturersList = meta.manufacturersList
+const vendorsList = meta.vendorsList
 
-const manufacturersList = await apiRequestAll(
-  accountId,
-  'Manufacturer.json'
-)
-
-const vendorsList = await apiRequestAll(
-  accountId,
-  'Vendor.json'
-)
-
-const departmentsList = []
-
-let items = []
 let customers = []
 let saleLines = []
 
 if (!isFiltersOnly && dateFrom && dateTo) {
-  items = await apiRequestAll(
-    accountId,
-    'Item.json?load_relations=["ItemShops"]'
-  )
-
   const fromIso = new Date(`${dateFrom}T00:00:00`).toISOString()
   const toIso = new Date(`${dateTo}T23:59:59`).toISOString()
 
@@ -1013,10 +1046,7 @@ if (!isFiltersOnly && dateFrom && dateTo) {
     accountId,
     `SaleLine.json?createTime=>,${encodeURIComponent(fromIso)}&createTime=<,${encodeURIComponent(toIso)}`
   )
-
-  customers = []
 }
-    
 
     const departmentMap = new Map()
     for (const department of departmentsList) {
