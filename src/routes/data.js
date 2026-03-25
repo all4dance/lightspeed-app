@@ -1,7 +1,7 @@
 const express = require('express')
 const router = express.Router()
 
-const SALES_META_CACHE = {
+const SALES_FILTER_CACHE = {
   fetchedAt: 0,
   ttlMs: 10 * 60 * 1000, // 10 minutes
   data: null
@@ -81,20 +81,15 @@ async function apiRequestAll(accountId, endpointBase) {
   return allRows
 }
 
-async function getSalesMetadata(accountId) {
+async function getSalesFilterMetadata(accountId) {
   const now = Date.now()
 
   if (
-    SALES_META_CACHE.data &&
-    now - SALES_META_CACHE.fetchedAt < SALES_META_CACHE.ttlMs
+    SALES_FILTER_CACHE.data &&
+    now - SALES_FILTER_CACHE.fetchedAt < SALES_FILTER_CACHE.ttlMs
   ) {
-    return SALES_META_CACHE.data
+    return SALES_FILTER_CACHE.data
   }
-
-  const items = await apiRequestAll(
-    accountId,
-    'Item.json?load_relations=["ItemShops"]'
-  )
 
   const categoriesList = await apiRequestAll(
     accountId,
@@ -112,14 +107,13 @@ async function getSalesMetadata(accountId) {
   )
 
   const data = {
-    items,
     categoriesList,
     manufacturersList,
     vendorsList
   }
 
-  SALES_META_CACHE.fetchedAt = now
-  SALES_META_CACHE.data = data
+  SALES_FILTER_CACHE.fetchedAt = now
+  SALES_FILTER_CACHE.data = data
 
   return data
 }
@@ -1029,8 +1023,8 @@ router.get('/reports/sales/:accountId', async (req, res) => {
 
     const isFiltersOnly = String(filtersOnly) === 'true'
 
-const meta = await getSalesMetadata(accountId)
-const items = meta.items
+const meta = await getSalesFilterMetadata(accountId)
+let items = []
 const categoriesList = meta.categoriesList
 const manufacturersList = meta.manufacturersList
 const vendorsList = meta.vendorsList
@@ -1039,6 +1033,11 @@ let customers = []
 let saleLines = []
 
 if (!isFiltersOnly && dateFrom && dateTo) {
+  items = await apiRequestAll(
+    accountId,
+    'Item.json?load_relations=["ItemShops"]'
+  )
+
   const fromIso = new Date(`${dateFrom}T00:00:00`).toISOString()
   const toIso = new Date(`${dateTo}T23:59:59`).toISOString()
 
