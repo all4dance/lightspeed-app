@@ -1070,12 +1070,12 @@ let saleLines = []
 if (!isFiltersOnly && dateFrom && dateTo) {
   items = await getSalesItems(accountId)
 
-const fromIso = new Date(`${dateFrom}T00:00:00`).toISOString()
-const toIso = new Date(`${dateTo}T23:59:59`).toISOString()
+const fromDate = new Date(`${dateFrom}T00:00:00`)
+const toDate = new Date(`${dateTo}T23:59:59`)
 
 const saleLinesData = await apiRequest(
   accountId,
-  `SaleLine.json?createTime=>,${encodeURIComponent(fromIso)}&createTime=<,${encodeURIComponent(toIso)}&limit=200`
+  `SaleLine.json?createTime=>,${encodeURIComponent(fromDate.toISOString())}&createTime=<,${encodeURIComponent(toDate.toISOString())}&limit=200`
 )
 
 saleLines = Array.isArray(saleLinesData?.SaleLine)
@@ -1271,84 +1271,87 @@ if (categoryValue && subcategoryValue) {
 
     const grouped = new Map()
 
-    for (const line of saleLines) {
-      const itemId = String(line.itemID || line.ItemID || '').trim()
-      if (!itemId) continue
+  for (const line of saleLines) {
+  const itemId = String(line.itemID || line.ItemID || '').trim()
+  if (!itemId) continue
 
-      if (String(line.isWorkorder) === 'true') continue
+  const createdAt = line.createTime || line.CreateTime || ''
+  if (!createdAt) continue
 
-      const createdAt = line.createTime || line.CreateTime || ''
-      if (!createdAt) continue
+  const createdDate = new Date(createdAt)
+  if (Number.isNaN(createdDate.getTime())) continue
 
-      const createdDate = new Date(createdAt)
-      if (Number.isNaN(createdDate.getTime())) continue
+  if (createdDate < fromDate) continue
+  if (createdDate > toDate) continue
 
-      const item = itemMap.get(itemId)
-      if (!item) continue
+  if (String(line.isWorkorder) === 'true') continue
 
-      if (category && normalizeText(item.category) !== normalizeText(category)) continue
-      if (subcategory && normalizeText(item.subcategory) !== normalizeText(subcategory)) continue
-      if (brand && normalizeText(item.brand) !== normalizeText(brand)) continue
-      if (supplier && normalizeText(item.supplier) !== normalizeText(supplier)) continue
+  const item = itemMap.get(itemId)
+  if (!item) continue
 
-      if (itemSearchNorm) {
-        const searchPool = [
-          item.description,
-          item.systemId,
-          item.customSku,
-          item.upc
-        ].map(normalizeText).join(' ')
+  if (category && normalizeText(item.category) !== normalizeText(category)) continue
+  if (subcategory && normalizeText(item.subcategory) !== normalizeText(subcategory)) continue
+  if (brand && normalizeText(item.brand) !== normalizeText(brand)) continue
+  if (supplier && normalizeText(item.supplier) !== normalizeText(supplier)) continue
 
-        if (!searchPool.includes(itemSearchNorm)) continue
-      }
+  if (itemSearchNorm) {
+    const searchPool = [
+      item.description,
+      item.systemId,
+      item.customSku,
+      item.upc
+    ].map(normalizeText).join(' ')
 
-      const customerId = String(line.customerID || line.CustomerID || '').trim()
-const customerInfo = customerMap.get(customerId) || {
-  name: '',
-  type: '',
-  tags: []
-}
-
-const customerNameNorm = normalizeText(customerInfo.name)
-
-if (customers.length > 0) {
-  if (blankCustomerMode === 'exclude' && !customerNameNorm) continue
-
-  if (
-    customerNameNorm &&
-    excludedCustomersNorm.some(excluded => excluded && customerNameNorm.includes(excluded))
-  ) {
-    continue
+    if (!searchPool.includes(itemSearchNorm)) continue
   }
 
-  if (!rowMatchesTypeFilter(customerInfo, typeMode, typeValue)) continue
-}
+  const customerId = String(line.customerID || line.CustomerID || '').trim()
+  const customerInfo = customerMap.get(customerId) || {
+    name: '',
+    type: '',
+    tags: []
+  }
 
-      const qty = Number(line.unitQuantity || line.UnitQuantity || line.quantity || 0)
-      if (!qty) continue
+  const customerNameNorm = normalizeText(customerInfo.name)
 
-      if (!grouped.has(itemId)) {
-        grouped.set(itemId, {
-          Description: item.description,
-          'System ID': item.systemId,
-          'Custom SKU': item.customSku,
-          UPC: item.upc,
-          Category: item.category,
-          Subcategory: item.subcategory,
-          Brand: item.brand,
-          Supplier: item.supplier,
-          'All 4 Dance West Stock': item.westStock,
-          'All 4 Dance South Stock': item.southStock,
-          'Total Stock': item.totalStock,
-          'Qty Sold': 0,
-          'Order Qty': 0,
-          _hasStockMatch: true
-        })
-      }
+  if (customers.length > 0) {
+    if (blankCustomerMode === 'exclude' && !customerNameNorm) continue
 
-      const row = grouped.get(itemId)
-      row['Qty Sold'] += qty
+    if (
+      customerNameNorm &&
+      excludedCustomersNorm.some(excluded => excluded && customerNameNorm.includes(excluded))
+    ) {
+      continue
     }
+
+    if (!rowMatchesTypeFilter(customerInfo, typeMode, typeValue)) continue
+  }
+
+  const qty = Number(line.unitQuantity || line.UnitQuantity || line.quantity || 0)
+  if (!qty) continue
+
+  if (!grouped.has(itemId)) {
+    grouped.set(itemId, {
+      Description: item.description,
+      'System ID': item.systemId,
+      'Custom SKU': item.customSku,
+      UPC: item.upc,
+      Category: item.category,
+      Subcategory: item.subcategory,
+      Brand: item.brand,
+      Supplier: item.supplier,
+      'All 4 Dance West Stock': item.westStock,
+      'All 4 Dance South Stock': item.southStock,
+      'Total Stock': item.totalStock,
+      'Qty Sold': 0,
+      'Order Qty': 0,
+      _hasStockMatch: true
+    })
+  }
+
+  const row = grouped.get(itemId)
+  row['Qty Sold'] += qty
+}
 
     const rows = Array.from(grouped.values())
       .map(row => ({
