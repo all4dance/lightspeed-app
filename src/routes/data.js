@@ -979,11 +979,6 @@ router.get('/reports/sales/:accountId', async (req, res) => {
 
     const isFiltersOnly = String(filtersOnly) === 'true'
 
-const items = await apiRequestAll(
-  accountId,
-  'Item.json?load_relations=["ItemShops"]'
-)
-
 const categoriesList = await apiRequestAll(
   accountId,
   'Category.json'
@@ -1001,10 +996,16 @@ const vendorsList = await apiRequestAll(
 
 const departmentsList = []
 
+let items = []
 let customers = []
 let saleLines = []
 
 if (!isFiltersOnly && dateFrom && dateTo) {
+  items = await apiRequestAll(
+    accountId,
+    'Item.json?load_relations=["ItemShops"]'
+  )
+
   customers = await apiRequestAll(
     accountId,
     'Customer.json'
@@ -1053,13 +1054,45 @@ for (const categoryRow of categoriesList) {
     }
 
     const itemMap = new Map()
-    const categories = new Set()
-    const subcategories = new Set()
-    const brands = new Set()
-    const suppliers = new Set()
-    const subcategoriesByCategory = {}
+const categories = new Set()
+const subcategories = new Set()
+const brands = new Set()
+const suppliers = new Set()
+const subcategoriesByCategory = {}
 
-    for (const item of items) {
+for (const categoryRow of categoriesList) {
+  const fullPath = String(categoryRow.fullPathName || categoryRow.FullPathName || categoryRow.name || categoryRow.Name || '').trim()
+
+  const pathParts = fullPath
+    .split('/')
+    .map(part => part.trim())
+    .filter(Boolean)
+
+  const mainCategory = pathParts[0] || ''
+  const subCategory = pathParts[1] || ''
+
+  if (mainCategory) categories.add(mainCategory)
+  if (subCategory) subcategories.add(subCategory)
+
+  if (mainCategory && subCategory) {
+    if (!subcategoriesByCategory[mainCategory]) {
+      subcategoriesByCategory[mainCategory] = new Set()
+    }
+    subcategoriesByCategory[mainCategory].add(subCategory)
+  }
+}
+
+for (const manufacturer of manufacturersList) {
+  const name = String(manufacturer.name || manufacturer.Name || '').trim()
+  if (name) brands.add(name)
+}
+
+for (const vendor of vendorsList) {
+  const name = String(vendor.name || vendor.Name || '').trim()
+  if (name) suppliers.add(name)
+}
+
+for (const item of items) {
       const itemId = String(item.itemID || item.ItemID || '').trim()
       if (!itemId) continue
 
