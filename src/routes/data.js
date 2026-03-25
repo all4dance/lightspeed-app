@@ -1145,4 +1145,26 @@ router.get('/reports/sales/:accountId', async (req, res) => {
   }
 })
 
+router.get('/reports/debug-items/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params
+
+    const itemsData = await apiRequest(
+      accountId,
+      'Item.json?load_relations=["ItemShops"]&limit=5'
+    )
+
+    const items = getItemArray(itemsData)
+
+    return res.json({
+      success: true,
+      count: items.length,
+      sample: items.slice(0, 5)
+    })
+  } catch (err) {
+    console.error('Debug items error:', err.message)
+    return res.status(500).json({ error: err.message })
+  }
+})
+
 module.exports = router
