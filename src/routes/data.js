@@ -972,11 +972,18 @@ router.get('/reports/sales/:accountId', async (req, res) => {
     }
 
     const categoryMap = new Map()
-    for (const categoryRow of categoriesList) {
-      const id = String(categoryRow.categoryID || categoryRow.CategoryID || '').trim()
-      const name = String(categoryRow.name || categoryRow.Name || '').trim()
-      if (id) categoryMap.set(id, name)
-    }
+for (const categoryRow of categoriesList) {
+  const id = String(categoryRow.categoryID || categoryRow.CategoryID || '').trim()
+
+  if (id) {
+    categoryMap.set(id, {
+      name: String(categoryRow.name || categoryRow.Name || '').trim(),
+      fullPathName: String(categoryRow.fullPathName || categoryRow.FullPathName || '').trim(),
+      parentID: String(categoryRow.parentID || categoryRow.ParentID || '').trim(),
+      nodeDepth: String(categoryRow.nodeDepth || categoryRow.NodeDepth || '').trim()
+    })
+  }
+}
 
     const manufacturerMap = new Map()
     for (const manufacturer of manufacturersList) {
@@ -1012,17 +1019,33 @@ router.get('/reports/sales/:accountId', async (req, res) => {
 const manufacturerId = String(item.manufacturerID || item.ManufacturerID || '').trim()
 const vendorId = String(item.defaultVendorID || item.DefaultVendorID || '').trim()
 
-const categoryValue = categoryMap.get(categoryId) || ''
-const subcategoryValue = ''
+const categoryRecord = categoryMap.get(categoryId) || null
+const fullPath = String(categoryRecord?.fullPathName || categoryRecord?.name || '').trim()
+
+const pathParts = fullPath
+  .split('/')
+  .map(part => part.trim())
+  .filter(Boolean)
+
+const categoryValue = pathParts[0] || ''
+const subcategoryValue = pathParts[1] || ''
+
 const brandValue = manufacturerMap.get(manufacturerId) || ''
 const supplierValue = vendorMap.get(vendorId) || ''
 
       const { westQty, southQty, totalQty } = getStoreQuantities(item)
 
       if (categoryValue) categories.add(categoryValue)
-      if (subcategoryValue) subcategories.add(subcategoryValue)
-      if (brandValue) brands.add(brandValue)
-      if (supplierValue) suppliers.add(supplierValue)
+if (subcategoryValue) subcategories.add(subcategoryValue)
+if (brandValue) brands.add(brandValue)
+if (supplierValue) suppliers.add(supplierValue)
+
+if (categoryValue && subcategoryValue) {
+  if (!subcategoriesByCategory[categoryValue]) {
+    subcategoriesByCategory[categoryValue] = new Set()
+  }
+  subcategoriesByCategory[categoryValue].add(subcategoryValue)
+}
 
 
       itemMap.set(itemId, {
