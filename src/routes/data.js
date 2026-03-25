@@ -1008,15 +1008,14 @@ router.get('/reports/sales/:accountId', async (req, res) => {
       const customSku = String(item.customSku || item.CustomSKU || '').trim()
       const upc = String(item.upc || item.UPC || '').trim()
 
-      const departmentId = String(item.departmentID || item.DepartmentID || '').trim()
       const categoryId = String(item.categoryID || item.CategoryID || '').trim()
-      const manufacturerId = String(item.manufacturerID || item.ManufacturerID || '').trim()
-      const vendorId = String(item.defaultVendorID || item.DefaultVendorID || '').trim()
+const manufacturerId = String(item.manufacturerID || item.ManufacturerID || '').trim()
+const vendorId = String(item.defaultVendorID || item.DefaultVendorID || '').trim()
 
-      const categoryValue = departmentMap.get(departmentId) || ''
-      const subcategoryValue = categoryMap.get(categoryId) || ''
-      const brandValue = manufacturerMap.get(manufacturerId) || ''
-      const supplierValue = vendorMap.get(vendorId) || ''
+const categoryValue = categoryMap.get(categoryId) || ''
+const subcategoryValue = ''
+const brandValue = manufacturerMap.get(manufacturerId) || ''
+const supplierValue = vendorMap.get(vendorId) || ''
 
       const { westQty, southQty, totalQty } = getStoreQuantities(item)
 
@@ -1025,12 +1024,6 @@ router.get('/reports/sales/:accountId', async (req, res) => {
       if (brandValue) brands.add(brandValue)
       if (supplierValue) suppliers.add(supplierValue)
 
-      if (categoryValue && subcategoryValue) {
-        if (!subcategoriesByCategory[categoryValue]) {
-          subcategoriesByCategory[categoryValue] = new Set()
-        }
-        subcategoriesByCategory[categoryValue].add(subcategoryValue)
-      }
 
       itemMap.set(itemId, {
         itemId,
@@ -1253,12 +1246,12 @@ router.get('/reports/sales/:accountId', async (req, res) => {
         format
       },
       filterOptions: {
-        categories: [...categories].sort((a, b) => a.localeCompare(b)),
-        subcategories: [...subcategories].sort((a, b) => a.localeCompare(b)),
-        brands: [...brands].sort((a, b) => a.localeCompare(b)),
-        suppliers: [...suppliers].sort((a, b) => a.localeCompare(b)),
-        subcategoriesByCategory: subcategoriesByCategoryJson
-      },
+  categories: [...categories].sort((a, b) => a.localeCompare(b)),
+  subcategories: [],
+  brands: [...brands].sort((a, b) => a.localeCompare(b)),
+  suppliers: [...suppliers].sort((a, b) => a.localeCompare(b)),
+  subcategoriesByCategory: {}
+},
       stats: {
         matchingProducts: rows.length,
         totalQtySold: rows.reduce((sum, row) => sum + Number(row['Qty Sold'] || 0), 0),
