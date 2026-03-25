@@ -86,6 +86,12 @@ function getVendorArray(vendorsData) {
   return []
 }
 
+function getDepartmentArray(departmentsData) {
+  if (Array.isArray(departmentsData?.Department)) return departmentsData.Department
+  if (departmentsData?.Department) return [departmentsData.Department]
+  return []
+}
+
 function parseNumber(value) {
   const cleaned = String(value ?? '').replace(/[^0-9.-]/g, '')
   return cleaned ? Number(cleaned) : 0
@@ -909,7 +915,7 @@ router.get('/reports/sales/:accountId', async (req, res) => {
       return res.status(400).json({ error: 'Invalid format. Use json or csv.' })
     }
 
-   const itemsData = await apiRequest(
+ const itemsData = await apiRequest(
   accountId,
   'Item.json?load_relations=["ItemShops"]&limit=10000'
 )
@@ -917,6 +923,11 @@ router.get('/reports/sales/:accountId', async (req, res) => {
 const customersData = await apiRequest(
   accountId,
   'Customer.json?limit=10000'
+)
+
+const departmentsData = await apiRequest(
+  accountId,
+  'Department.json?limit=10000'
 )
 
 const categoriesData = await apiRequest(
@@ -939,8 +950,9 @@ const saleLinesData = await apiRequest(
   'SaleLine.json?limit=10000'
 )
 
-    const items = getItemArray(itemsData)
+const items = getItemArray(itemsData)
 const customers = getCustomerArray(customersData)
+const departmentsList = getDepartmentArray(departmentsData)
 const categoriesList = getCategoryArray(categoriesData)
 const manufacturersList = getManufacturerArray(manufacturersData)
 const vendorsList = getVendorArray(vendorsData)
@@ -950,6 +962,13 @@ const saleLines = Array.isArray(saleLinesData?.SaleLine)
   : saleLinesData?.SaleLine
     ? [saleLinesData.SaleLine]
     : []
+
+    const departmentMap = new Map()
+for (const department of departmentsList) {
+  const id = String(department.departmentID || department.DepartmentID || '').trim()
+  const name = String(department.name || department.Name || '').trim()
+  if (id) departmentMap.set(id, name)
+}
 
 const categoryMap = new Map()
 for (const category of categoriesList) {
@@ -972,45 +991,35 @@ for (const vendor of vendorsList) {
   if (id) vendorMap.set(id, name)
 }
 
-    const itemMap = new Map()
-    const categories = new Set()
-    const subcategories = new Set()
-    const brands = new Set()
-    const suppliers = new Set()
+const itemMap = new Map()
+const categories = new Set()
+const subcategories = new Set()
+const brands = new Set()
+const suppliers = new Set()
+const subcategoriesByCategory = {}
 
-    for (const item of items) {
-      const itemId = String(item.itemID || item.ItemID || '').trim()
-      if (!itemId) continue
-
-      const systemId = String(item.systemSku || item.SystemSku || '').trim()
-      const description = String(item.description || item.Description || '').trim()
-      const customSku = String(item.customSku || item.CustomSKU || '').trim()
-      const upc = String(item.upc || item.UPC || '').trim()
-
-      const categoryId = String(item.categoryID || item.CategoryID || '').trim()
+   const departmentId = String(item.departmentID || item.DepartmentID || '').trim()
+const categoryId = String(item.categoryID || item.CategoryID || '').trim()
 const manufacturerId = String(item.manufacturerID || item.ManufacturerID || '').trim()
 const vendorId = String(item.defaultVendorID || item.DefaultVendorID || '').trim()
 
-const categoryValue = categoryMap.get(categoryId) || ''
+const categoryValue = departmentMap.get(departmentId) || ''
+const subcategoryValue = categoryMap.get(categoryId) || ''
 const brandValue = manufacturerMap.get(manufacturerId) || ''
 const supplierValue = vendorMap.get(vendorId) || ''
-
-const subcategoryValue = String(
-  item.subCategory1 ||
-  item.Subcategory1 ||
-  item.subcategory1 ||
-  item['Subcategory 1'] ||
-  item.subCategory ||
-  item.SubCategory ||
-  ''
-).trim()
-
       const { westQty, southQty, totalQty } = getStoreQuantities(item)
 
       if (categoryValue) categories.add(categoryValue)
-      if (subcategoryValue) subcategories.add(subcategoryValue)
-      if (brandValue) brands.add(brandValue)
-      if (supplierValue) suppliers.add(supplierValue)
+if (subcategoryValue) subcategories.add(subcategoryValue)
+if (brandValue) brands.add(brandValue)
+if (supplierValue) suppliers.add(supplierValue)
+
+if (categoryValue && subcategoryValue) {
+  if (!subcategoriesByCategory[categoryValue]) {
+    subcategoriesByCategory[categoryValue] = new Set()
+  }
+  subcategoriesByCategory[categoryValue].add(subcategoryValue)
+}
 
       itemMap.set(itemId, {
         itemId,
@@ -1045,9 +1054,50 @@ const subcategoryValue = String(
     const excludedCustomersNorm = parseCsvList(excludeCustomers).map(normalizeText)
 
     const fromDate = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null
-    const toDate = dateTo ? new Date(`${dateTo}T23:59:59`) : null
+const toDate = dateTo ? new Date(`${dateTo}T23:59:59`) : null
+const filtersOnly = String(req.query.filtersOnly || 'false') === 'true'
 
-    const grouped = new Map()
+const subcategoriesByCategoryJson = {}
+for (const [categoryName, subcategorySet] of Object.entries(subcategoriesByCategory)) {
+  subcategoriesByCategoryJson[categoryName] = [...subcategorySet].sort((a, b) => a.localeCompare(b))
+}
+
+if (filtersOnly || !dateFrom || !dateTo) {
+  return res.json({
+    success: true,
+    report: 'sales',
+    filters: {
+      accountId,
+      dateFrom,
+      dateTo,
+      itemSearch,
+      category,
+      subcategory,
+      brand,
+      supplier,
+      typeMode,
+      typeValue,
+      blankCustomerMode,
+      excludeCustomers,
+      format
+    },
+    filterOptions: {
+      categories: [...categories].sort((a, b) => a.localeCompare(b)),
+      subcategories: [...subcategories].sort((a, b) => a.localeCompare(b)),
+      brands: [...brands].sort((a, b) => a.localeCompare(b)),
+      suppliers: [...suppliers].sort((a, b) => a.localeCompare(b)),
+      subcategoriesByCategory: subcategoriesByCategoryJson
+    },
+    stats: {
+      matchingProducts: 0,
+      totalQtySold: 0,
+      productsWithStockMatch: 0
+    },
+    rows: []
+  })
+}
+
+const grouped = new Map()
 
     for (const line of saleLines) {
       const itemId = String(line.itemID || line.ItemID || '').trim()
@@ -1191,11 +1241,12 @@ const subcategoryValue = String(
         format
       },
       filterOptions: {
-        categories: [...categories].sort((a, b) => a.localeCompare(b)),
-        subcategories: [...subcategories].sort((a, b) => a.localeCompare(b)),
-        brands: [...brands].sort((a, b) => a.localeCompare(b)),
-        suppliers: [...suppliers].sort((a, b) => a.localeCompare(b))
-      },
+  categories: [...categories].sort((a, b) => a.localeCompare(b)),
+  subcategories: [...subcategories].sort((a, b) => a.localeCompare(b)),
+  brands: [...brands].sort((a, b) => a.localeCompare(b)),
+  suppliers: [...suppliers].sort((a, b) => a.localeCompare(b)),
+  subcategoriesByCategory: subcategoriesByCategoryJson
+},
       stats: {
         matchingProducts: rows.length,
         totalQtySold: rows.reduce((sum, row) => sum + Number(row['Qty Sold'] || 0), 0),
