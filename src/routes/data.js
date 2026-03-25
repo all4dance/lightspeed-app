@@ -68,6 +68,24 @@ function getCustomerArray(customersData) {
   return []
 }
 
+function getCategoryArray(categoriesData) {
+  if (Array.isArray(categoriesData?.Category)) return categoriesData.Category
+  if (categoriesData?.Category) return [categoriesData.Category]
+  return []
+}
+
+function getManufacturerArray(manufacturersData) {
+  if (Array.isArray(manufacturersData?.Manufacturer)) return manufacturersData.Manufacturer
+  if (manufacturersData?.Manufacturer) return [manufacturersData.Manufacturer]
+  return []
+}
+
+function getVendorArray(vendorsData) {
+  if (Array.isArray(vendorsData?.Vendor)) return vendorsData.Vendor
+  if (vendorsData?.Vendor) return [vendorsData.Vendor]
+  return []
+}
+
 function parseNumber(value) {
   const cleaned = String(value ?? '').replace(/[^0-9.-]/g, '')
   return cleaned ? Number(cleaned) : 0
@@ -894,23 +912,67 @@ router.get('/reports/sales/:accountId', async (req, res) => {
     }
 
     const itemsData = await apiRequest(
-      accountId,
-      'Item.json?load_relations=["ItemShops"]&limit=10000'
-    )
+  accountId,
+  'Item.json?load_relations=["ItemShops"]&limit=10000'
+)
 
-    const customersData = await apiRequest(
-      accountId,
-      'Customer.json?limit=10000'
-    )
+const customersData = await apiRequest(
+  accountId,
+  'Customer.json?limit=10000'
+)
 
-    const saleLinesData = await apiRequest(
-      accountId,
-      'SaleLine.json?limit=10000'
-    )
+const categoriesData = await apiRequest(
+  accountId,
+  'Category.json?limit=10000'
+)
+
+const manufacturersData = await apiRequest(
+  accountId,
+  'Manufacturer.json?limit=10000'
+)
+
+const vendorsData = await apiRequest(
+  accountId,
+  'Vendor.json?limit=10000'
+)
+
+const saleLinesData = await apiRequest(
+  accountId,
+  'SaleLine.json?limit=10000'
+)
 
     const items = getItemArray(itemsData)
-    const customers = getCustomerArray(customersData)
-    const saleLines = Array.isArray(saleLinesData?.SaleLine)
+const customers = getCustomerArray(customersData)
+const categoriesList = getCategoryArray(categoriesData)
+const manufacturersList = getManufacturerArray(manufacturersData)
+const vendorsList = getVendorArray(vendorsData)
+
+const saleLines = Array.isArray(saleLinesData?.SaleLine)
+  ? saleLinesData.SaleLine
+  : saleLinesData?.SaleLine
+    ? [saleLinesData.SaleLine]
+    : []
+
+const categoryMap = new Map()
+for (const category of categoriesList) {
+  const id = String(category.categoryID || category.CategoryID || '').trim()
+  const name = String(category.name || category.Name || '').trim()
+  if (id) categoryMap.set(id, name)
+}
+
+const manufacturerMap = new Map()
+for (const manufacturer of manufacturersList) {
+  const id = String(manufacturer.manufacturerID || manufacturer.ManufacturerID || '').trim()
+  const name = String(manufacturer.name || manufacturer.Name || '').trim()
+  if (id) manufacturerMap.set(id, name)
+}
+
+const vendorMap = new Map()
+for (const vendor of vendorsList) {
+  const id = String(vendor.vendorID || vendor.VendorID || '').trim()
+  const name = String(vendor.name || vendor.Name || '').trim()
+  if (id) vendorMap.set(id, name)
+}
       ? saleLinesData.SaleLine
       : saleLinesData?.SaleLine
         ? [saleLinesData.SaleLine]
@@ -930,16 +992,23 @@ router.get('/reports/sales/:accountId', async (req, res) => {
       const description = String(item.description || item.Description || '').trim()
       const customSku = String(item.customSku || item.CustomSKU || '').trim()
       const upc = String(item.upc || item.UPC || '').trim()
-      const brandValue = String(item.brand || item.Brand || '').trim()
-      const categoryValue = String(item.category || item.Category || '').trim()
-      const subcategoryValue = String(
-        item.subCategory1 ||
-        item.Subcategory1 ||
-        item.subcategory1 ||
-        item['Subcategory 1'] ||
-        ''
-      ).trim()
-      const supplierValue = getItemSupplier(item)
+     const categoryId = String(item.categoryID || item.CategoryID || '').trim()
+const manufacturerId = String(item.manufacturerID || item.ManufacturerID || '').trim()
+const vendorId = String(item.defaultVendorID || item.DefaultVendorID || '').trim()
+
+const categoryValue = categoryMap.get(categoryId) || ''
+const brandValue = manufacturerMap.get(manufacturerId) || ''
+const supplierValue = vendorMap.get(vendorId) || ''
+
+const subcategoryValue = String(
+  item.subCategory1 ||
+  item.Subcategory1 ||
+  item.subcategory1 ||
+  item['Subcategory 1'] ||
+  item.subCategory ||
+  item.SubCategory ||
+  ''
+).trim()
 
       const { westQty, southQty, totalQty } = getStoreQuantities(item)
 
