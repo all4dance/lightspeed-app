@@ -7,6 +7,12 @@ const SALES_FILTER_CACHE = {
   data: null
 }
 
+const SALES_ITEM_CACHE = {
+  fetchedAt: 0,
+  ttlMs: 10 * 60 * 1000, // 10 minutes
+  data: null
+}
+
 const { apiRequest } = require('../lightspeed')
 
 const STORE_MAP = {
@@ -92,26 +98,26 @@ async function getSalesFilterMetadata(accountId) {
   }
 
   const categoriesData = await apiRequest(accountId, 'Category.json')
-const manufacturersData = await apiRequest(accountId, 'Manufacturer.json')
-const vendorsData = await apiRequest(accountId, 'Vendor.json')
+  const manufacturersData = await apiRequest(accountId, 'Manufacturer.json')
+  const vendorsData = await apiRequest(accountId, 'Vendor.json')
 
-const categoriesList = Array.isArray(categoriesData?.Category)
-  ? categoriesData.Category
-  : categoriesData?.Category
-    ? [categoriesData.Category]
-    : []
+  const categoriesList = Array.isArray(categoriesData?.Category)
+    ? categoriesData.Category
+    : categoriesData?.Category
+      ? [categoriesData.Category]
+      : []
 
-const manufacturersList = Array.isArray(manufacturersData?.Manufacturer)
-  ? manufacturersData.Manufacturer
-  : manufacturersData?.Manufacturer
-    ? [manufacturersData.Manufacturer]
-    : []
+  const manufacturersList = Array.isArray(manufacturersData?.Manufacturer)
+    ? manufacturersData.Manufacturer
+    : manufacturersData?.Manufacturer
+      ? [manufacturersData.Manufacturer]
+      : []
 
-const vendorsList = Array.isArray(vendorsData?.Vendor)
-  ? vendorsData.Vendor
-  : vendorsData?.Vendor
-    ? [vendorsData.Vendor]
-    : []
+  const vendorsList = Array.isArray(vendorsData?.Vendor)
+    ? vendorsData.Vendor
+    : vendorsData?.Vendor
+      ? [vendorsData.Vendor]
+      : []
 
   const data = {
     categoriesList,
@@ -123,6 +129,27 @@ const vendorsList = Array.isArray(vendorsData?.Vendor)
   SALES_FILTER_CACHE.data = data
 
   return data
+}
+
+async function getSalesItems(accountId) {
+  const now = Date.now()
+
+  if (
+    SALES_ITEM_CACHE.data &&
+    now - SALES_ITEM_CACHE.fetchedAt < SALES_ITEM_CACHE.ttlMs
+  ) {
+    return SALES_ITEM_CACHE.data
+  }
+
+  const items = await apiRequestAll(
+    accountId,
+    'Item.json?load_relations=["ItemShops"]'
+  )
+
+  SALES_ITEM_CACHE.fetchedAt = now
+  SALES_ITEM_CACHE.data = items
+
+  return items
 }
 
 function getItemShops(item) {
@@ -1030,41 +1057,6 @@ router.get('/reports/sales/:accountId', async (req, res) => {
 
     const isFiltersOnly = String(filtersOnly) === 'true'
 
-    if (isFiltersOnly) {
-  return res.json({
-    success: true,
-    report: 'sales',
-    filters: {
-      accountId,
-      dateFrom,
-      dateTo,
-      itemSearch,
-      category,
-      subcategory,
-      brand,
-      supplier,
-      typeMode,
-      typeValue,
-      blankCustomerMode,
-      excludeCustomers,
-      filtersOnly,
-      format
-    },
-    filterOptions: {
-      categories: [],
-      subcategories: [],
-      brands: [],
-      suppliers: [],
-      subcategoriesByCategory: {}
-    },
-    stats: {
-      matchingProducts: 0,
-      totalQtySold: 0,
-      productsWithStockMatch: 0
-    },
-    rows: []
-  })
-}
 
 const meta = await getSalesFilterMetadata(accountId)
 let items = []
@@ -1076,10 +1068,7 @@ let customers = []
 let saleLines = []
 
 if (!isFiltersOnly && dateFrom && dateTo) {
-  items = await apiRequestAll(
-    accountId,
-    'Item.json?load_relations=["ItemShops"]'
-  )
+  items = await getSalesItems(accountId)
 
   const fromIso = new Date(`${dateFrom}T00:00:00`).toISOString()
   const toIso = new Date(`${dateTo}T23:59:59`).toISOString()
