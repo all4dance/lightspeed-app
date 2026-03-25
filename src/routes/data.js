@@ -297,9 +297,10 @@ router.get('/reports/dust/:accountId', async (req, res) => {
     startDate.setDate(startDate.getDate() - Number(days))
     const startIso = startDate.toISOString()
 
-   const itemsData = await apiRequest(
-  accountId,
-  'Item.json?load_relations=["ItemShops"]&limit=10000'
+    const itemsData = await apiRequest(
+      accountId,
+      'Item.json?load_relations=["ItemShops"]&limit=10000'
+    )
 
     const items = getItemArray(itemsData)
     const soldMap = await buildSoldMap(accountId, startIso, store)
@@ -395,9 +396,7 @@ router.get('/reports/dust/:accountId', async (req, res) => {
     })
   } catch (err) {
     console.error('Dust report error:', err.message)
-    return res.status(500).json({
-      error: err.message
-    })
+    return res.status(500).json({ error: err.message })
   }
 })
 
