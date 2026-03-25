@@ -15,14 +15,12 @@ function getItemArray(itemsData) {
 
 async function apiRequestAll(accountId, endpointBase) {
   let allRows = []
-  let offset = 0
-  const limit = 1000
+  let nextEndpoint = endpointBase.includes('?')
+    ? `${endpointBase}&limit=100`
+    : `${endpointBase}?limit=100`
 
-  while (true) {
-    const separator = endpointBase.includes('?') ? '&' : '?'
-    const endpoint = `${endpointBase}${separator}limit=${limit}&offset=${offset}`
-
-    const data = await apiRequest(accountId, endpoint)
+  while (nextEndpoint) {
+    const data = await apiRequest(accountId, nextEndpoint)
 
     let rows = []
 
@@ -43,8 +41,25 @@ async function apiRequestAll(accountId, endpointBase) {
 
     allRows = allRows.concat(rows)
 
-    if (rows.length < limit) break
-    offset += limit
+    const nextUrl =
+      data?.['@attributes']?.next ||
+      data?.attributes?.next ||
+      data?.next ||
+      null
+
+    if (!nextUrl) {
+      nextEndpoint = null
+    } else {
+      try {
+        const parsed = new URL(nextUrl)
+        nextEndpoint = `${parsed.pathname.split('/API/V3/Account/')[1]}${parsed.search}`
+      } catch (err) {
+        nextEndpoint = nextUrl.replace(/^https?:\/\/[^/]+\//, '')
+        if (nextEndpoint.startsWith('API/V3/Account/')) {
+          nextEndpoint = nextEndpoint.replace(/^API\/V3\/Account\/[^/]+\//, '')
+        }
+      }
+    }
   }
 
   return allRows
