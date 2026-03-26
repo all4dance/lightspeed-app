@@ -1692,4 +1692,37 @@ router.get('/cache/status', async (req, res) => {
   }
 })
 
+router.get('/cache/debug-sales-page/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params
+
+    const response = await apiRequest(
+      accountId,
+      'Sale.json?completed=true&voided=false&archived=false&sort=completeTime&load_relations=["SaleLines"]&limit=10'
+    )
+
+    const sales = Array.isArray(response?.Sale)
+      ? response.Sale
+      : response?.Sale
+        ? [response.Sale]
+        : []
+
+    return res.json({
+      success: true,
+      count: sales.length,
+      sample: sales.map(sale => ({
+        saleID: sale.saleID || sale.SaleID,
+        completeTime: sale.completeTime || sale.CompleteTime || '',
+        completed: sale.completed,
+        voided: sale.voided,
+        archived: sale.archived,
+        hasSaleLines: !!sale.SaleLines
+      }))
+    })
+  } catch (err) {
+    console.error('Debug sales page error:', err.message)
+    return res.status(500).json({ error: err.message })
+  }
+})
+
 module.exports = router
