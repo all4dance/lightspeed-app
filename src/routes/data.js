@@ -1074,9 +1074,9 @@ if (!isFiltersOnly && dateFrom && dateTo) {
   items = await getSalesItems(accountId)
 
   const salesData = await apiRequest(
-    accountId,
-    `Sale.json?completed=true&voided=false&archived=false&load_relations=["SaleLines"]&limit=200`
-  )
+  accountId,
+  `Sale.json?completed=true&voided=false&archived=false&load_relations=["SaleLines"]&sort=completeTime&limit=500`
+)
 
   sales = Array.isArray(salesData?.Sale)
     ? salesData.Sale
