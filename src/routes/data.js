@@ -1266,9 +1266,6 @@ if (categoryValue && subcategoryValue) {
     const itemSearchNorm = normalizeText(itemSearch)
     const excludedCustomersNorm = parseCsvList(excludeCustomers).map(normalizeText)
 
-    const fromDate = new Date(`${dateFrom}T00:00:00`)
-    const toDate = new Date(`${dateTo}T23:59:59`)
-
     const grouped = new Map()
 
   for (const sale of sales) {
