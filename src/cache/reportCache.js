@@ -196,11 +196,12 @@ async function getItemsCache() {
 }
 
 async function refreshSalesForDate(accountId, dateStr) {
-  const fromDate = new Date(`${dateStr}T00:00:00`)
-  const toDate = new Date(`${dateStr}T23:59:59`)
+  const fromDate = new Date(`${dateStr}T00:00:00-06:00`)
+  const toDate = new Date(`${dateStr}T23:59:59-06:00`)
 
   let nextEndpoint =
-  `Sale.json?completed=true&voided=false&archived=false&timeStamp=%3E%3C,${encodeURIComponent(fromDate.toISOString())},${encodeURIComponent(toDate.toISOString())}&sort=-timeStamp&load_relations=["SaleLines"]&limit=100`
+    `Sale.json?completed=true&voided=false&archived=false&timeStamp=%3E%3C,${encodeURIComponent(fromDate.toISOString())},${encodeURIComponent(toDate.toISOString())}&sort=-timeStamp&load_relations=["SaleLines"]&limit=100`
+
   const grouped = {}
   let pageCount = 0
   const maxPages = 10
@@ -229,6 +230,8 @@ async function refreshSalesForDate(accountId, dateStr) {
       if (String(sale.voided) === 'true') continue
       if (String(sale.archived) === 'true') continue
 
+      const saleShopId = String(sale.shopID || sale.ShopID || '').trim()
+
       const saleLinesContainer = sale.SaleLines
       const saleLines = Array.isArray(saleLinesContainer?.SaleLine)
         ? saleLinesContainer.SaleLine
@@ -242,12 +245,27 @@ async function refreshSalesForDate(accountId, dateStr) {
 
         if (String(line.isLayaway) === 'true') continue
         if (String(line.isSpecialOrder) === 'true') continue
+        if (String(line.isWorkorder) === 'true') continue
 
         const qty = Number(line.unitQuantity || line.UnitQuantity || line.quantity || 0)
         if (!qty) continue
 
-        if (!grouped[itemId]) grouped[itemId] = 0
-        grouped[itemId] += qty
+        if (!grouped[itemId]) {
+          grouped[itemId] = {
+            westNetQty: 0,
+            southNetQty: 0,
+            totalNetQty: 0
+          }
+        }
+
+        if (saleShopId === STORE_MAP.west) {
+          grouped[itemId].westNetQty += qty
+        } else if (saleShopId === STORE_MAP.south) {
+          grouped[itemId].southNetQty += qty
+        }
+
+        grouped[itemId].totalNetQty =
+          grouped[itemId].westNetQty + grouped[itemId].southNetQty
       }
     }
 
@@ -296,15 +314,15 @@ async function refreshSalesForDate(accountId, dateStr) {
   await writeJson(SALES_CACHE_FILE, salesCache)
 
   let netQty = 0
-for (const qty of Object.values(grouped)) {
-  netQty += qty
-}
+  for (const itemTotals of Object.values(grouped)) {
+    netQty += Number(itemTotals.totalNetQty || 0)
+  }
 
-return {
-  grouped,
-  pageCount,
-  netQty
-}
+  return {
+    grouped,
+    pageCount,
+    netQty
+  }
 }
 
 async function refreshSalesRange(accountId, daysBack = 1) {
@@ -315,11 +333,25 @@ async function refreshSalesRange(accountId, daysBack = 1) {
     const d = new Date(today)
     d.setDate(d.getDate() - i)
     const dateStr = d.toISOString().slice(0, 10)
+
     const result = await refreshSalesForDate(accountId, dateStr)
+
+    let westNetQty = 0
+    let southNetQty = 0
+    let totalNetQty = 0
+
+    for (const itemTotals of Object.values(result.grouped)) {
+      westNetQty += Number(itemTotals.westNetQty || 0)
+      southNetQty += Number(itemTotals.southNetQty || 0)
+      totalNetQty += Number(itemTotals.totalNetQty || 0)
+    }
 
     results.push({
       date: dateStr,
       rows: Object.keys(result.grouped).length,
+      westNetQty,
+      southNetQty,
+      totalNetQty,
       pageCount: result.pageCount
     })
   }

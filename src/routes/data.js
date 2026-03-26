@@ -1656,11 +1656,24 @@ router.get('/cache/refresh-sales/:accountId', async (req, res) => {
 
     if (date) {
   const result = await refreshSalesForDate(accountId, date)
+
+  let westNetQty = 0
+  let southNetQty = 0
+  let totalNetQty = 0
+
+  for (const itemTotals of Object.values(result.grouped)) {
+    westNetQty += Number(itemTotals.westNetQty || 0)
+    southNetQty += Number(itemTotals.southNetQty || 0)
+    totalNetQty += Number(itemTotals.totalNetQty || 0)
+  }
+
   return res.json({
     success: true,
     date,
     rows: Object.keys(result.grouped).length,
-    netQty: result.netQty,
+    westNetQty,
+    southNetQty,
+    totalNetQty,
     pageCount: result.pageCount
   })
 }
