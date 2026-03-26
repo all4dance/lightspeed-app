@@ -297,7 +297,112 @@ while (nextEndpoint && pageCount < maxPages) {
   return {
   grouped,
   pageCount
-}
+
+  async function refreshSalesForDate(accountId, dateStr) {
+  const fromDate = new Date(`${dateStr}T00:00:00`)
+  const toDate = new Date(`${dateStr}T23:59:59`)
+
+  let nextEndpoint =
+    'Sale.json?completed=true&voided=false&archived=false&sort=completeTime&load_relations=["SaleLines"]&limit=100'
+
+  const grouped = {}
+  let pageCount = 0
+  const maxPages = 10
+
+  while (nextEndpoint && pageCount < maxPages) {
+    pageCount++
+
+    const response = await apiRequest(accountId, nextEndpoint)
+
+    const sales = Array.isArray(response?.Sale)
+      ? response.Sale
+      : response?.Sale
+        ? [response.Sale]
+        : []
+
+    for (const sale of sales) {
+      const completeTime = sale.completeTime || sale.CompleteTime || ''
+      if (!completeTime) continue
+
+      const completedDate = new Date(completeTime)
+      if (Number.isNaN(completedDate.getTime())) continue
+
+      if (completedDate < fromDate) continue
+      if (completedDate > toDate) continue
+      if (String(sale.completed) !== 'true') continue
+      if (String(sale.voided) === 'true') continue
+      if (String(sale.archived) === 'true') continue
+
+      const saleLinesContainer = sale.SaleLines
+      const saleLines = Array.isArray(saleLinesContainer?.SaleLine)
+        ? saleLinesContainer.SaleLine
+        : saleLinesContainer?.SaleLine
+          ? [saleLinesContainer.SaleLine]
+          : []
+
+      for (const line of saleLines) {
+        const itemId = String(line.itemID || line.ItemID || '').trim()
+        if (!itemId) continue
+
+        if (String(line.isLayaway) === 'true') continue
+        if (String(line.isSpecialOrder) === 'true') continue
+
+        const qty = Number(line.unitQuantity || line.UnitQuantity || line.quantity || 0)
+        if (!qty) continue
+
+        if (!grouped[itemId]) grouped[itemId] = 0
+        grouped[itemId] += qty
+      }
+    }
+
+    const nextUrl =
+      response?.['@attributes']?.next ||
+      response?.attributes?.next ||
+      response?.next ||
+      null
+
+    if (!nextUrl) {
+      nextEndpoint = null
+    } else {
+      try {
+        const parsed = new URL(nextUrl)
+        const marker = `/API/V3/Account/${accountId}/`
+        const fullPath = `${parsed.pathname}${parsed.search}`
+        const markerIndex = fullPath.indexOf(marker)
+
+        if (markerIndex >= 0) {
+          nextEndpoint = fullPath.substring(markerIndex + marker.length)
+        } else {
+          nextEndpoint = parsed.pathname.replace(/^\/+/, '') + parsed.search
+        }
+      } catch (err) {
+        let cleaned = String(nextUrl).replace(/^https?:\/\/[^/]+\//, '')
+        cleaned = cleaned.replace(/^API\/V3\/Account\/[^/]+\//, '')
+        nextEndpoint = cleaned
+      }
+    }
+
+    if (nextEndpoint) {
+      await new Promise(resolve => setTimeout(resolve, 150))
+    }
+  }
+
+  const salesCache = await readJson(SALES_CACHE_FILE, {
+    updatedAt: null,
+    accountId,
+    days: {}
+  })
+
+  salesCache.updatedAt = new Date().toISOString()
+  salesCache.accountId = accountId
+  salesCache.days[dateStr] = grouped
+
+  await writeJson(SALES_CACHE_FILE, salesCache)
+
+  return {
+    grouped,
+    pageCount
+  }
 }
 
 async function refreshSalesRange(accountId, daysBack = 1) {
