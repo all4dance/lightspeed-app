@@ -1740,4 +1740,40 @@ router.get('/cache/debug-sales-page/:accountId', async (req, res) => {
   }
 })
 
+router.get('/cache/debug-sales-shops/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params
+    const date = req.query.date || '2026-03-25'
+
+    const fromDate = new Date(`${date}T00:00:00-06:00`)
+    const toDate = new Date(`${date}T23:59:59-06:00`)
+
+    const response = await apiRequest(
+      accountId,
+      `Sale.json?completed=true&voided=false&archived=false&timeStamp=%3E%3C,${encodeURIComponent(fromDate.toISOString())},${encodeURIComponent(toDate.toISOString())}&sort=-timeStamp&load_relations=["SaleLines"]&limit=100`
+    )
+
+    const sales = Array.isArray(response?.Sale)
+      ? response.Sale
+      : response?.Sale
+        ? [response.Sale]
+        : []
+
+    return res.json({
+      success: true,
+      date,
+      count: sales.length,
+      sample: sales.slice(0, 25).map(sale => ({
+        saleID: sale.saleID || sale.SaleID,
+        shopID: sale.shopID || sale.ShopID || '',
+        completeTime: sale.completeTime || sale.CompleteTime || '',
+        total: sale.total || sale.Total || ''
+      }))
+    })
+  } catch (err) {
+    console.error('Debug sales shops error:', err.message)
+    return res.status(500).json({ error: err.message })
+  }
+})
+
 module.exports = router
