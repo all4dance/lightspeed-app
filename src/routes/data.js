@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 
+
 const SALES_FILTER_CACHE = {
   fetchedAt: 0,
   ttlMs: 10 * 60 * 1000, // 10 minutes
@@ -14,6 +15,14 @@ const SALES_ITEM_CACHE = {
 }
 
 const { apiRequest } = require('../lightspeed')
+
+const {
+  refreshItemsCache,
+  getItemsCache,
+  refreshSalesForDate,
+  refreshSalesRange,
+  getSalesCache
+} = require('../cache/reportCache')
 
 const STORE_MAP = {
   west: '1',
@@ -1030,11 +1039,214 @@ router.get('/reports/debug-transfers/:accountId', async (req, res) => {
   }
 })
 
-// SALES SUMMARY REPORT
+// --- SALES CACHES ---
+const SALES_FILTER_CACHE = {
+  fetchedAt: 0,
+  ttlMs: 10 * 60 * 1000, // 10 minutes
+  data: null
+}
+
+const SALES_ITEM_CACHE = {
+  fetchedAt: 0,
+  ttlMs: 10 * 60 * 1000, // 10 minutes
+  data: null
+}
+
+// --- HELPERS ---
+function getCategoryArray(categoriesData) {
+  if (Array.isArray(categoriesData?.Category)) return categoriesData.Category
+  if (categoriesData?.Category) return [categoriesData.Category]
+  return []
+}
+
+function getManufacturerArray(manufacturersData) {
+  if (Array.isArray(manufacturersData?.Manufacturer)) return manufacturersData.Manufacturer
+  if (manufacturersData?.Manufacturer) return [manufacturersData.Manufacturer]
+  return []
+}
+
+function getVendorArray(vendorsData) {
+  if (Array.isArray(vendorsData?.Vendor)) return vendorsData.Vendor
+  if (vendorsData?.Vendor) return [vendorsData.Vendor]
+  return []
+}
+
+function normalizeText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9%]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function parseCsvList(value) {
+  return String(value || '')
+    .split(',')
+    .map(v => v.trim())
+    .filter(Boolean)
+}
+
+function roundUpToThree(value) {
+  if (value <= 0) return 0
+  return Math.ceil(value / 3) * 3
+}
+
+function calculateOrderQty(qtySold, totalStock, brand) {
+  const rawNeed = Math.max(0, Number(qtySold || 0) - Number(totalStock || 0))
+  if (!rawNeed) return 0
+  return normalizeText(brand) === 'mondor' ? roundUpToThree(rawNeed) : rawNeed
+}
+
+function escapeCsv(value) {
+  const stringValue = String(value ?? '')
+  if (
+    stringValue.includes('"') ||
+    stringValue.includes(',') ||
+    stringValue.includes('\n')
+  ) {
+    return `"${stringValue.replace(/"/g, '""')}"`
+  }
+  return stringValue
+}
+
+function getStoreQuantities(item) {
+  const shops = Array.isArray(item?.ItemShops?.ItemShop)
+    ? item.ItemShops.ItemShop
+    : item?.ItemShops?.ItemShop
+      ? [item.ItemShops.ItemShop]
+      : []
+
+  let westQty = 0
+  let southQty = 0
+
+  for (const shop of shops) {
+    const shopId = String(shop.shopID || shop.ShopID || '').trim()
+    const qty = Number(shop.qoh || shop.QOH || 0)
+
+    if (shopId === STORE_MAP.west) westQty = qty
+    if (shopId === STORE_MAP.south) southQty = qty
+  }
+
+  return {
+    westQty,
+    southQty,
+    totalQty: westQty + southQty
+  }
+}
+
+async function apiRequestAll(accountId, endpointBase) {
+  let allRows = []
+  let nextEndpoint = endpointBase.includes('?')
+    ? `${endpointBase}&limit=100`
+    : `${endpointBase}?limit=100`
+
+  while (nextEndpoint) {
+    const data = await apiRequest(accountId, nextEndpoint)
+
+    let rows = []
+
+    if (Array.isArray(data?.Sale)) rows = data.Sale
+    else if (data?.Sale) rows = [data.Sale]
+    else if (Array.isArray(data?.Item)) rows = data.Item
+    else if (data?.Item) rows = [data.Item]
+    else if (Array.isArray(data?.Category)) rows = data.Category
+    else if (data?.Category) rows = [data.Category]
+    else if (Array.isArray(data?.Manufacturer)) rows = data.Manufacturer
+    else if (data?.Manufacturer) rows = [data.Manufacturer]
+    else if (Array.isArray(data?.Vendor)) rows = data.Vendor
+    else if (data?.Vendor) rows = [data.Vendor]
+
+    allRows = allRows.concat(rows)
+
+    const nextUrl =
+      data?.['@attributes']?.next ||
+      data?.attributes?.next ||
+      data?.next ||
+      null
+
+    if (!nextUrl) {
+      nextEndpoint = null
+    } else {
+      try {
+        const parsed = new URL(nextUrl)
+        const marker = `/API/V3/Account/${accountId}/`
+        const fullPath = `${parsed.pathname}${parsed.search}`
+        const markerIndex = fullPath.indexOf(marker)
+
+        if (markerIndex >= 0) {
+          nextEndpoint = fullPath.substring(markerIndex + marker.length)
+        } else {
+          nextEndpoint = parsed.pathname.replace(/^\/+/, '') + parsed.search
+        }
+      } catch (err) {
+        let cleaned = String(nextUrl).replace(/^https?:\/\/[^/]+\//, '')
+        cleaned = cleaned.replace(/^API\/V3\/Account\/[^/]+\//, '')
+        nextEndpoint = cleaned
+      }
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 150))
+  }
+
+  return allRows
+}
+
+async function getSalesFilterMetadata(accountId) {
+  const now = Date.now()
+
+  if (
+    SALES_FILTER_CACHE.data &&
+    now - SALES_FILTER_CACHE.fetchedAt < SALES_FILTER_CACHE.ttlMs
+  ) {
+    return SALES_FILTER_CACHE.data
+  }
+
+  const categoriesData = await apiRequest(accountId, 'Category.json')
+  const manufacturersData = await apiRequest(accountId, 'Manufacturer.json')
+  const vendorsData = await apiRequest(accountId, 'Vendor.json')
+
+  const categoriesList = getCategoryArray(categoriesData)
+  const manufacturersList = getManufacturerArray(manufacturersData)
+  const vendorsList = getVendorArray(vendorsData)
+
+  const data = {
+    categoriesList,
+    manufacturersList,
+    vendorsList
+  }
+
+  SALES_FILTER_CACHE.fetchedAt = now
+  SALES_FILTER_CACHE.data = data
+
+  return data
+}
+
+async function getSalesItems(accountId) {
+  const now = Date.now()
+
+  if (
+    SALES_ITEM_CACHE.data &&
+    now - SALES_ITEM_CACHE.fetchedAt < SALES_ITEM_CACHE.ttlMs
+  ) {
+    return SALES_ITEM_CACHE.data
+  }
+
+  const items = await apiRequestAll(
+    accountId,
+    'Item.json?load_relations=["ItemShops"]'
+  )
+
+  SALES_ITEM_CACHE.fetchedAt = now
+  SALES_ITEM_CACHE.data = items
+
+  return items
+}
+
+// --- SALES SUMMARY REPORT ---
 router.get('/reports/sales/:accountId', async (req, res) => {
   try {
     const { accountId } = req.params
-
     const {
       dateFrom = '',
       dateTo = '',
@@ -1043,10 +1255,10 @@ router.get('/reports/sales/:accountId', async (req, res) => {
       subcategory = '',
       brand = '',
       supplier = '',
-      typeMode = 'exclude',
-      typeValue = 'Studio Account 25%',
+      typeMode = 'none',
+      typeValue = '',
       blankCustomerMode = 'include',
-      excludeCustomers = 'INVENTORY ADJUSTMENT',
+      excludeCustomers = '',
       filtersOnly = 'false',
       format = 'json'
     } = req.query
@@ -1056,178 +1268,74 @@ router.get('/reports/sales/:accountId', async (req, res) => {
     }
 
     const isFiltersOnly = String(filtersOnly) === 'true'
+    const fromDate = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null
+    const toDate = dateTo ? new Date(`${dateTo}T23:59:59`) : null
 
+    const meta = await getSalesFilterMetadata(accountId)
+    const categoriesList = meta.categoriesList
+    const manufacturersList = meta.manufacturersList
+    const vendorsList = meta.vendorsList
 
-const meta = await getSalesFilterMetadata(accountId)
-let items = []
-const categoriesList = meta.categoriesList
-const manufacturersList = meta.manufacturersList
-const vendorsList = meta.vendorsList
-
-const fromDate = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null
-const toDate = dateTo ? new Date(`${dateTo}T23:59:59`) : null
-
-let customers = []
-let sales = []
-
-if (!isFiltersOnly && dateFrom && dateTo) {
-  items = await getSalesItems(accountId)
-
-  const salesData = await apiRequest(
-  accountId,
-  `Sale.json?completed=true&voided=false&archived=false&load_relations=["SaleLines"]&sort=completeTime&limit=500`
-)
-
-  sales = Array.isArray(salesData?.Sale)
-    ? salesData.Sale
-    : salesData?.Sale
-      ? [salesData.Sale]
-      : []
-}
     const categoryMap = new Map()
-for (const categoryRow of categoriesList) {
-  const id = String(categoryRow.categoryID || categoryRow.CategoryID || '').trim()
+    const categories = new Set()
+    const subcategories = new Set()
+    const subcategoriesByCategory = {}
 
-  if (id) {
-    categoryMap.set(id, {
-      name: String(categoryRow.name || categoryRow.Name || '').trim(),
-      fullPathName: String(categoryRow.fullPathName || categoryRow.FullPathName || '').trim(),
-      parentID: String(categoryRow.parentID || categoryRow.ParentID || '').trim(),
-      nodeDepth: String(categoryRow.nodeDepth || categoryRow.NodeDepth || '').trim()
-    })
-  }
-}
+    for (const categoryRow of categoriesList) {
+      const id = String(categoryRow.categoryID || categoryRow.CategoryID || '').trim()
+      const name = String(categoryRow.name || categoryRow.Name || '').trim()
+      const fullPathName = String(categoryRow.fullPathName || categoryRow.FullPathName || name).trim()
+
+      if (id) {
+        categoryMap.set(id, {
+          name,
+          fullPathName
+        })
+      }
+
+      const parts = fullPathName
+        .split('/')
+        .map(part => part.trim())
+        .filter(Boolean)
+
+      const main = parts[0] || ''
+      const sub = parts[1] || ''
+
+      if (main) categories.add(main)
+      if (sub) subcategories.add(sub)
+
+      if (main && sub) {
+        if (!subcategoriesByCategory[main]) {
+          subcategoriesByCategory[main] = new Set()
+        }
+        subcategoriesByCategory[main].add(sub)
+      }
+    }
 
     const manufacturerMap = new Map()
+    const brands = new Set()
     for (const manufacturer of manufacturersList) {
       const id = String(manufacturer.manufacturerID || manufacturer.ManufacturerID || '').trim()
       const name = String(manufacturer.name || manufacturer.Name || '').trim()
       if (id) manufacturerMap.set(id, name)
+      if (name) brands.add(name)
     }
 
     const vendorMap = new Map()
+    const suppliers = new Set()
     for (const vendor of vendorsList) {
       const id = String(vendor.vendorID || vendor.VendorID || '').trim()
       const name = String(vendor.name || vendor.Name || '').trim()
       if (id) vendorMap.set(id, name)
-    }
-
-    const itemMap = new Map()
-const categories = new Set()
-const subcategories = new Set()
-const brands = new Set()
-const suppliers = new Set()
-const subcategoriesByCategory = {}
-
-for (const categoryRow of categoriesList) {
-  const fullPath = String(categoryRow.fullPathName || categoryRow.FullPathName || categoryRow.name || categoryRow.Name || '').trim()
-
-  const pathParts = fullPath
-    .split('/')
-    .map(part => part.trim())
-    .filter(Boolean)
-
-  const mainCategory = pathParts[0] || ''
-  const subCategory = pathParts[1] || ''
-
-  if (mainCategory) categories.add(mainCategory)
-  if (subCategory) subcategories.add(subCategory)
-
-  if (mainCategory && subCategory) {
-    if (!subcategoriesByCategory[mainCategory]) {
-      subcategoriesByCategory[mainCategory] = new Set()
-    }
-    subcategoriesByCategory[mainCategory].add(subCategory)
-  }
-}
-
-for (const manufacturer of manufacturersList) {
-  const name = String(manufacturer.name || manufacturer.Name || '').trim()
-  if (name) brands.add(name)
-}
-
-for (const vendor of vendorsList) {
-  const name = String(vendor.name || vendor.Name || '').trim()
-  if (name) suppliers.add(name)
-}
-
-for (const item of items) {
-      const itemId = String(item.itemID || item.ItemID || '').trim()
-      if (!itemId) continue
-
-      const systemId = String(item.systemSku || item.SystemSku || '').trim()
-      const description = String(item.description || item.Description || '').trim()
-      const customSku = String(item.customSku || item.CustomSKU || '').trim()
-      const upc = String(item.upc || item.UPC || '').trim()
-
-      const categoryId = String(item.categoryID || item.CategoryID || '').trim()
-const manufacturerId = String(item.manufacturerID || item.ManufacturerID || '').trim()
-const vendorId = String(item.defaultVendorID || item.DefaultVendorID || '').trim()
-
-const categoryRecord = categoryMap.get(categoryId) || null
-const fullPath = String(categoryRecord?.fullPathName || categoryRecord?.name || '').trim()
-
-const pathParts = fullPath
-  .split('/')
-  .map(part => part.trim())
-  .filter(Boolean)
-
-const categoryValue = pathParts[0] || ''
-const subcategoryValue = pathParts[1] || ''
-
-const brandValue = manufacturerMap.get(manufacturerId) || ''
-const supplierValue = vendorMap.get(vendorId) || ''
-
-      const { westQty, southQty, totalQty } = getStoreQuantities(item)
-
-      if (categoryValue) categories.add(categoryValue)
-if (subcategoryValue) subcategories.add(subcategoryValue)
-if (brandValue) brands.add(brandValue)
-if (supplierValue) suppliers.add(supplierValue)
-
-if (categoryValue && subcategoryValue) {
-  if (!subcategoriesByCategory[categoryValue]) {
-    subcategoriesByCategory[categoryValue] = new Set()
-  }
-  subcategoriesByCategory[categoryValue].add(subcategoryValue)
-}
-
-
-      itemMap.set(itemId, {
-        itemId,
-        systemId,
-        description,
-        customSku,
-        upc,
-        brand: brandValue,
-        category: categoryValue,
-        subcategory: subcategoryValue,
-        supplier: supplierValue,
-        westStock: westQty,
-        southStock: southQty,
-        totalStock: totalQty
-      })
+      if (name) suppliers.add(name)
     }
 
     const subcategoriesByCategoryJson = {}
-    for (const [categoryName, subcategorySet] of Object.entries(subcategoriesByCategory)) {
-      subcategoriesByCategoryJson[categoryName] = [...subcategorySet].sort((a, b) => a.localeCompare(b))
+    for (const [mainCategory, subSet] of Object.entries(subcategoriesByCategory)) {
+      subcategoriesByCategoryJson[mainCategory] = [...subSet].sort((a, b) => a.localeCompare(b))
     }
 
-    const customerMap = new Map()
-
-    for (const customer of customers) {
-      const customerId = String(customer.customerID || customer.CustomerID || '').trim()
-      if (!customerId) continue
-
-      customerMap.set(customerId, {
-        name: getCustomerDisplayName(customer),
-        type: getCustomerType(customer),
-        tags: parseCustomerTags(customer)
-      })
-    }
-
-    if (isFiltersOnly || !dateFrom || !dateTo) {
+    if (isFiltersOnly || !fromDate || !toDate) {
       return res.json({
         success: true,
         report: 'sales',
@@ -1263,84 +1371,180 @@ if (categoryValue && subcategoryValue) {
       })
     }
 
-    const itemSearchNorm = normalizeText(itemSearch)
-    const excludedCustomersNorm = parseCsvList(excludeCustomers).map(normalizeText)
+    const items = await getSalesItems(accountId)
 
-    const grouped = new Map()
+    const itemMap = new Map()
+    for (const item of items) {
+      const itemId = String(item.itemID || item.ItemID || '').trim()
+      if (!itemId) continue
 
-  for (const sale of sales) {
-  const completeTime = sale.completeTime || sale.CompleteTime || ''
-  if (!completeTime) continue
+      const categoryId = String(item.categoryID || item.CategoryID || '').trim()
+      const manufacturerId = String(item.manufacturerID || item.ManufacturerID || '').trim()
+      const vendorId = String(item.defaultVendorID || item.DefaultVendorID || '').trim()
 
-  const completedDate = new Date(completeTime)
-  if (Number.isNaN(completedDate.getTime())) continue
+      const categoryRecord = categoryMap.get(categoryId) || null
+      const fullPath = String(categoryRecord?.fullPathName || categoryRecord?.name || '').trim()
+      const pathParts = fullPath
+        .split('/')
+        .map(part => part.trim())
+        .filter(Boolean)
 
-  if (completedDate < fromDate) continue
-  if (completedDate > toDate) continue
+      const mainCategory = pathParts[0] || ''
+      const subCategory = pathParts[1] || ''
 
-  if (String(sale.completed) !== 'true') continue
-  if (String(sale.voided) === 'true') continue
-  if (String(sale.archived) === 'true') continue
+      const { westQty, southQty, totalQty } = getStoreQuantities(item)
 
-  const saleLinesContainer = sale.SaleLines
-  const saleLines = Array.isArray(saleLinesContainer?.SaleLine)
-    ? saleLinesContainer.SaleLine
-    : saleLinesContainer?.SaleLine
-      ? [saleLinesContainer.SaleLine]
-      : []
-
-  for (const line of saleLines) {
-    const itemId = String(line.itemID || line.ItemID || '').trim()
-    if (!itemId) continue
-
-    if (String(line.isLayaway) === 'true') continue
-    if (String(line.isSpecialOrder) === 'true') continue
-
-    const item = itemMap.get(itemId)
-    if (!item) continue
-
-    if (category && normalizeText(item.category) !== normalizeText(category)) continue
-    if (subcategory && normalizeText(item.subcategory) !== normalizeText(subcategory)) continue
-    if (brand && normalizeText(item.brand) !== normalizeText(brand)) continue
-    if (supplier && normalizeText(item.supplier) !== normalizeText(supplier)) continue
-
-    if (itemSearchNorm) {
-      const searchPool = [
-        item.description,
-        item.systemId,
-        item.customSku,
-        item.upc
-      ].map(normalizeText).join(' ')
-
-      if (!searchPool.includes(itemSearchNorm)) continue
-    }
-
-    const qty = Number(line.unitQuantity || line.UnitQuantity || line.quantity || 0)
-    if (!qty) continue
-
-    if (!grouped.has(itemId)) {
-      grouped.set(itemId, {
-        Description: item.description,
-        'System ID': item.systemId,
-        'Custom SKU': item.customSku,
-        UPC: item.upc,
-        Category: item.category,
-        Subcategory: item.subcategory,
-        Brand: item.brand,
-        Supplier: item.supplier,
-        'All 4 Dance West Stock': item.westStock,
-        'All 4 Dance South Stock': item.southStock,
-        'Total Stock': item.totalStock,
-        'Qty Sold': 0,
-        'Order Qty': 0,
-        _hasStockMatch: true
+      itemMap.set(itemId, {
+        itemId,
+        systemId: String(item.systemSku || item.SystemSku || '').trim(),
+        description: String(item.description || item.Description || '').trim(),
+        customSku: String(item.customSku || item.CustomSKU || '').trim(),
+        upc: String(item.upc || item.UPC || '').trim(),
+        category: mainCategory,
+        subcategory: subCategory,
+        brand: manufacturerMap.get(manufacturerId) || '',
+        supplier: vendorMap.get(vendorId) || '',
+        westStock: westQty,
+        southStock: southQty,
+        totalStock: totalQty
       })
     }
 
-    const row = grouped.get(itemId)
-    row['Qty Sold'] += qty
-  }
-}
+    const itemSearchNorm = normalizeText(itemSearch)
+    const _excludedCustomersNorm = parseCsvList(excludeCustomers).map(normalizeText)
+    void _excludedCustomersNorm
+    void typeMode
+    void typeValue
+    void blankCustomerMode
+
+    let grouped = new Map()
+
+    let nextEndpoint =
+      'Sale.json?completed=true&voided=false&archived=false&sort=completeTime&load_relations=["SaleLines"]&limit=100'
+
+    while (nextEndpoint) {
+      const data = await apiRequest(accountId, nextEndpoint)
+      const sales = Array.isArray(data?.Sale)
+        ? data.Sale
+        : data?.Sale
+          ? [data.Sale]
+          : []
+
+      let shouldStopPaging = false
+
+      for (const sale of sales) {
+        const completeTime = sale.completeTime || sale.CompleteTime || ''
+        if (!completeTime) continue
+
+        const completedDate = new Date(completeTime)
+        if (Number.isNaN(completedDate.getTime())) continue
+
+        if (completedDate < fromDate) {
+          shouldStopPaging = true
+          continue
+        }
+
+        if (completedDate > toDate) continue
+
+        if (String(sale.completed) !== 'true') continue
+        if (String(sale.voided) === 'true') continue
+        if (String(sale.archived) === 'true') continue
+
+        const saleLinesContainer = sale.SaleLines
+        const saleLines = Array.isArray(saleLinesContainer?.SaleLine)
+          ? saleLinesContainer.SaleLine
+          : saleLinesContainer?.SaleLine
+            ? [saleLinesContainer.SaleLine]
+            : []
+
+        for (const line of saleLines) {
+          const itemId = String(line.itemID || line.ItemID || '').trim()
+          if (!itemId) continue
+
+          if (String(line.isLayaway) === 'true') continue
+          if (String(line.isSpecialOrder) === 'true') continue
+
+          const item = itemMap.get(itemId)
+          if (!item) continue
+
+          if (category && normalizeText(item.category) !== normalizeText(category)) continue
+          if (subcategory && normalizeText(item.subcategory) !== normalizeText(subcategory)) continue
+          if (brand && normalizeText(item.brand) !== normalizeText(brand)) continue
+          if (supplier && normalizeText(item.supplier) !== normalizeText(supplier)) continue
+
+          if (itemSearchNorm) {
+            const searchPool = [
+              item.description,
+              item.systemId,
+              item.customSku,
+              item.upc
+            ].map(normalizeText).join(' ')
+
+            if (!searchPool.includes(itemSearchNorm)) continue
+          }
+
+          const qty = Number(line.unitQuantity || line.UnitQuantity || line.quantity || 0)
+          if (!qty) continue
+
+          if (!grouped.has(itemId)) {
+            grouped.set(itemId, {
+              Description: item.description,
+              'System ID': item.systemId,
+              'Custom SKU': item.customSku,
+              UPC: item.upc,
+              Category: item.category,
+              Subcategory: item.subcategory,
+              Brand: item.brand,
+              Supplier: item.supplier,
+              'All 4 Dance West Stock': item.westStock,
+              'All 4 Dance South Stock': item.southStock,
+              'Total Stock': item.totalStock,
+              'Qty Sold': 0,
+              'Order Qty': 0,
+              _hasStockMatch: true
+            })
+          }
+
+          const row = grouped.get(itemId)
+          row['Qty Sold'] += qty
+        }
+      }
+
+      if (shouldStopPaging) {
+        nextEndpoint = null
+      } else {
+        const nextUrl =
+          data?.['@attributes']?.next ||
+          data?.attributes?.next ||
+          data?.next ||
+          null
+
+        if (!nextUrl) {
+          nextEndpoint = null
+        } else {
+          try {
+            const parsed = new URL(nextUrl)
+            const marker = `/API/V3/Account/${accountId}/`
+            const fullPath = `${parsed.pathname}${parsed.search}`
+            const markerIndex = fullPath.indexOf(marker)
+
+            if (markerIndex >= 0) {
+              nextEndpoint = fullPath.substring(markerIndex + marker.length)
+            } else {
+              nextEndpoint = parsed.pathname.replace(/^\/+/, '') + parsed.search
+            }
+          } catch (err) {
+            let cleaned = String(nextUrl).replace(/^https?:\/\/[^/]+\//, '')
+            cleaned = cleaned.replace(/^API\/V3\/Account\/[^/]+\//, '')
+            nextEndpoint = cleaned
+          }
+        }
+      }
+
+      if (nextEndpoint) {
+        await new Promise(resolve => setTimeout(resolve, 150))
+      }
+    }
 
     const rows = Array.from(grouped.values())
       .map(row => ({
@@ -1377,11 +1581,7 @@ if (categoryValue && subcategoryValue) {
       ]
 
       res.setHeader('Content-Type', 'text/csv')
-      res.setHeader(
-        'Content-Disposition',
-        'attachment; filename="sales-report.csv"'
-      )
-
+      res.setHeader('Content-Disposition', 'attachment; filename="sales-report.csv"')
       return res.send(csvRows.join('\n'))
     }
 
@@ -1405,12 +1605,12 @@ if (categoryValue && subcategoryValue) {
         format
       },
       filterOptions: {
-  categories: [...categories].sort((a, b) => a.localeCompare(b)),
-  subcategories: [],
-  brands: [...brands].sort((a, b) => a.localeCompare(b)),
-  suppliers: [...suppliers].sort((a, b) => a.localeCompare(b)),
-  subcategoriesByCategory: {}
-},
+        categories: [...categories].sort((a, b) => a.localeCompare(b)),
+        subcategories: [...subcategories].sort((a, b) => a.localeCompare(b)),
+        brands: [...brands].sort((a, b) => a.localeCompare(b)),
+        suppliers: [...suppliers].sort((a, b) => a.localeCompare(b)),
+        subcategoriesByCategory: subcategoriesByCategoryJson
+      },
       stats: {
         matchingProducts: rows.length,
         totalQtySold: rows.reduce((sum, row) => sum + Number(row['Qty Sold'] || 0), 0),
@@ -1423,7 +1623,6 @@ if (categoryValue && subcategoryValue) {
     return res.status(500).json({ error: err.message })
   }
 })
-
 // DEBUG
 router.get('/reports/debug-items/:accountId', async (req, res) => {
   try {
@@ -1443,6 +1642,64 @@ router.get('/reports/debug-items/:accountId', async (req, res) => {
     })
   } catch (err) {
     console.error('Debug items error:', err.message)
+    return res.status(500).json({ error: err.message })
+  }
+})
+
+router.get('/cache/refresh-items/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params
+    const result = await refreshItemsCache(accountId)
+    return res.json({
+      success: true,
+      updatedAt: result.updatedAt,
+      itemCount: result.items.length
+    })
+  } catch (err) {
+    console.error('Refresh items cache error:', err.message)
+    return res.status(500).json({ error: err.message })
+  }
+})
+
+router.get('/cache/refresh-sales/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params
+    const { date = '', days = '7' } = req.query
+
+    if (date) {
+      const result = await refreshSalesForDate(accountId, date)
+      return res.json({
+        success: true,
+        date,
+        rows: Object.keys(result).length
+      })
+    }
+
+    const rangeResult = await refreshSalesRange(accountId, Number(days || 7))
+    return res.json({
+      success: true,
+      results: rangeResult
+    })
+  } catch (err) {
+    console.error('Refresh sales cache error:', err.message)
+    return res.status(500).json({ error: err.message })
+  }
+})
+
+router.get('/cache/status', async (req, res) => {
+  try {
+    const items = await getItemsCache()
+    const sales = await getSalesCache()
+
+    return res.json({
+      success: true,
+      itemsUpdatedAt: items.updatedAt,
+      itemCount: items.items.length,
+      salesUpdatedAt: sales.updatedAt,
+      salesDays: Object.keys(sales.days || {}).length
+    })
+  } catch (err) {
+    console.error('Cache status error:', err.message)
     return res.status(500).json({ error: err.message })
   }
 })

@@ -5,6 +5,11 @@ const cors = require('cors')
 const authRoutes = require('./routes/auth')
 const dataRoutes = require('./routes/data')
 
+const cron = require('node-cron')
+const {
+  refreshItemsCache,
+  refreshSalesRange
+} = require('./cache/reportCache')
 const app = express()
 
 app.use((req, res, next) => {
@@ -41,6 +46,30 @@ app.use('/api', dataRoutes)
 // Add this block for debug routes
 const debugRoutes = require('./routes/debug');
 app.use('/api/debug', debugRoutes);   // ← your line
+
+const CACHE_ACCOUNT_ID = '223888'
+
+// Refresh item metadata every 6 hours
+cron.schedule('0 */6 * * *', async () => {
+  try {
+    console.log('Refreshing item cache...')
+    await refreshItemsCache(CACHE_ACCOUNT_ID)
+    console.log('Item cache refreshed')
+  } catch (err) {
+    console.error('Item cache refresh failed:', err.message)
+  }
+})
+
+// Refresh last 7 days of sales every night at 2:15 AM server time
+cron.schedule('15 2 * * *', async () => {
+  try {
+    console.log('Refreshing daily sales cache...')
+    await refreshSalesRange(CACHE_ACCOUNT_ID, 7)
+    console.log('Daily sales cache refreshed')
+  } catch (err) {
+    console.error('Daily sales cache refresh failed:', err.message)
+  }
+})
 
 const PORT = process.env.PORT || 3000
 
