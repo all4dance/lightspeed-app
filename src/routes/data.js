@@ -1636,13 +1636,13 @@ router.get('/reports/debug-items/:accountId', async (req, res) => {
 router.get('/cache/refresh-items/:accountId', async (req, res) => {
   try {
     const { accountId } = req.params
-    const result = await refreshSalesForDate(accountId, date)
-return res.json({
-  success: true,
-  date,
-  rows: Object.keys(result.grouped).length,
-  pageCount: result.pageCount
-})
+    const result = await refreshItemsCache(accountId)
+
+    return res.json({
+      success: true,
+      updatedAt: result.updatedAt,
+      itemCount: result.items.length
+    })
   } catch (err) {
     console.error('Refresh items cache error:', err.message)
     return res.status(500).json({ error: err.message })
@@ -1659,7 +1659,7 @@ router.get('/cache/refresh-sales/:accountId', async (req, res) => {
       return res.json({
         success: true,
         date,
-        rows: Object.keys(result).length
+        rows: Object.keys(result.grouped).length
       })
     }
 
