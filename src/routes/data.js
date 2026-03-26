@@ -1655,13 +1655,15 @@ router.get('/cache/refresh-sales/:accountId', async (req, res) => {
     const { date = '', days = '7' } = req.query
 
     if (date) {
-      const result = await refreshSalesForDate(accountId, date)
-      return res.json({
-        success: true,
-        date,
-        rows: Object.keys(result.grouped).length
-      })
-    }
+  const result = await refreshSalesForDate(accountId, date)
+  return res.json({
+    success: true,
+    date,
+    rows: Object.keys(result.grouped).length,
+    netQty: result.netQty,
+    pageCount: result.pageCount
+  })
+}
 
     const rangeResult = await refreshSalesRange(accountId, Number(days || 7))
     return res.json({

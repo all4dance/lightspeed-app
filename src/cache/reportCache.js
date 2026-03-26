@@ -296,10 +296,16 @@ async function refreshSalesForDate(accountId, dateStr) {
 
   await writeJson(SALES_CACHE_FILE, salesCache)
 
-  return {
-    grouped,
-    pageCount
-  }
+  let netQty = 0
+for (const qty of Object.values(grouped)) {
+  netQty += qty
+}
+
+return {
+  grouped,
+  pageCount,
+  netQty
+}
 }
 
 async function refreshSalesRange(accountId, daysBack = 1) {
