@@ -204,8 +204,11 @@ async function refreshSalesForDate(accountId, dateStr) {
 
   const grouped = {}
 
-  while (nextEndpoint) {
-    const data = await apiRequest(accountId, nextEndpoint)
+ let pageCount = 0
+const maxPages = 20
+
+while (nextEndpoint && pageCount < maxPages) {
+  pageCount += 1
 
     const sales = Array.isArray(data?.Sale)
       ? data.Sale
@@ -291,7 +294,10 @@ async function refreshSalesForDate(accountId, dateStr) {
   salesCache.days[dateStr] = grouped
 
   await writeJson(SALES_CACHE_FILE, salesCache)
-  return grouped
+  return {
+  grouped,
+  pageCount
+}
 }
 
 async function refreshSalesRange(accountId, daysBack = 7) {
@@ -303,7 +309,12 @@ async function refreshSalesRange(accountId, daysBack = 7) {
     d.setDate(d.getDate() - i)
     const dateStr = d.toISOString().slice(0, 10)
     const result = await refreshSalesForDate(accountId, dateStr)
-    results.push({ date: dateStr, rows: Object.keys(result).length })
+results.push({
+  date: dateStr,
+  rows: Object.keys(result.grouped).length,
+  pageCount: result.pageCount
+})
+
   }
 
   return results
