@@ -205,10 +205,10 @@ async function refreshSalesForDate(accountId, dateStr) {
   const grouped = {}
 
  let pageCount = 0
-const maxPages = 20
+const maxPages = 10
 
 while (nextEndpoint && pageCount < maxPages) {
-  pageCount += 1
+  pageCount ++
 
     const sales = Array.isArray(data?.Sale)
       ? data.Sale
@@ -300,7 +300,7 @@ while (nextEndpoint && pageCount < maxPages) {
 }
 }
 
-async function refreshSalesRange(accountId, daysBack = 7) {
+async function refreshSalesRange(accountId, daysBack = 1) {
   const today = new Date()
   const results = []
 

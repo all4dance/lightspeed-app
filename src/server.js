@@ -71,7 +71,29 @@ cron.schedule('15 2 * * *', async () => {
   }
 })
 
-const PORT = process.env.PORT || 3000
+const CACHE_ACCOUNT_ID = '223888'
+
+// Refresh items every 6 hours
+cron.schedule('0 */6 * * *', async () => {
+  try {
+    console.log('Refreshing item cache...')
+    await refreshItemsCache(CACHE_ACCOUNT_ID)
+    console.log('Item cache refreshed')
+  } catch (err) {
+    console.error('Item cache refresh failed:', err.message)
+  }
+})
+
+// Refresh sales every 10 minutes (SAFE version)
+cron.schedule('*/10 * * * *', async () => {
+  try {
+    console.log('Running background sales cache...')
+    await refreshSalesRange(CACHE_ACCOUNT_ID, 1)
+    console.log('Sales cache updated')
+  } catch (err) {
+    console.error('Sales cache failed:', err.message)
+  }
+})
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
