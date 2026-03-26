@@ -1698,7 +1698,7 @@ router.get('/cache/debug-sales-page/:accountId', async (req, res) => {
 
     const response = await apiRequest(
       accountId,
-      'Sale.json?completed=true&voided=false&archived=false&sort=completeTime&load_relations=["SaleLines"]&limit=10'
+      'Sale.json?completed=true&voided=false&archived=false&sort=completeTime:desc&load_relations=["SaleLines"]&limit=10'
     )
 
     const sales = Array.isArray(response?.Sale)
