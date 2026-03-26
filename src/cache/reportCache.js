@@ -297,7 +297,8 @@ while (nextEndpoint && pageCount < maxPages) {
   return {
   grouped,
   pageCount
-
+  }
+  
   async function refreshSalesForDate(accountId, dateStr) {
   const fromDate = new Date(`${dateStr}T00:00:00`)
   const toDate = new Date(`${dateStr}T23:59:59`)
