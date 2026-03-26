@@ -1039,19 +1039,6 @@ router.get('/reports/debug-transfers/:accountId', async (req, res) => {
   }
 })
 
-// --- SALES CACHES ---
-const SALES_FILTER_CACHE = {
-  fetchedAt: 0,
-  ttlMs: 10 * 60 * 1000, // 10 minutes
-  data: null
-}
-
-const SALES_ITEM_CACHE = {
-  fetchedAt: 0,
-  ttlMs: 10 * 60 * 1000, // 10 minutes
-  data: null
-}
-
 // --- HELPERS ---
 function getCategoryArray(categoriesData) {
   if (Array.isArray(categoriesData?.Category)) return categoriesData.Category
