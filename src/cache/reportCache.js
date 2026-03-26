@@ -200,8 +200,7 @@ async function refreshSalesForDate(accountId, dateStr) {
   const toDate = new Date(`${dateStr}T23:59:59`)
 
   let nextEndpoint =
-  `Sale.json?completed=true&voided=false&archived=false&timeStamp=%3E%3C%2C${encodeURIComponent(fromDate.toISOString())},${encodeURIComponent(toDate.toISOString())}&sort=-completeTime&load_relations=["SaleLines"]&limit=100`
-
+  `Sale.json?completed=true&voided=false&archived=false&timeStamp=%3E%3C,${encodeURIComponent(fromDate.toISOString())},${encodeURIComponent(toDate.toISOString())}&sort=-timeStamp&load_relations=["SaleLines"]&limit=100`
   const grouped = {}
   let pageCount = 0
   const maxPages = 10
