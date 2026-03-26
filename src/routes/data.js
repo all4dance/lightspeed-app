@@ -1064,25 +1064,25 @@ const categoriesList = meta.categoriesList
 const manufacturersList = meta.manufacturersList
 const vendorsList = meta.vendorsList
 
+const fromDate = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null
+const toDate = dateTo ? new Date(`${dateTo}T23:59:59`) : null
+
 let customers = []
-let saleLines = []
+let sales = []
 
 if (!isFiltersOnly && dateFrom && dateTo) {
   items = await getSalesItems(accountId)
 
-const fromDate = new Date(`${dateFrom}T00:00:00`)
-const toDate = new Date(`${dateTo}T23:59:59`)
+  const salesData = await apiRequest(
+    accountId,
+    `Sale.json?completed=true&voided=false&archived=false&load_relations=["SaleLines"]&limit=200`
+  )
 
-const saleLinesData = await apiRequest(
-  accountId,
-  `SaleLine.json?createTime=>,${encodeURIComponent(fromDate.toISOString())}&createTime=<,${encodeURIComponent(toDate.toISOString())}&limit=200`
-)
-
-saleLines = Array.isArray(saleLinesData?.SaleLine)
-  ? saleLinesData.SaleLine
-  : saleLinesData?.SaleLine
-    ? [saleLinesData.SaleLine]
-    : []
+  sales = Array.isArray(salesData?.Sale)
+    ? salesData.Sale
+    : salesData?.Sale
+      ? [salesData.Sale]
+      : []
 }
     const categoryMap = new Map()
 for (const categoryRow of categoriesList) {
@@ -1271,86 +1271,78 @@ if (categoryValue && subcategoryValue) {
 
     const grouped = new Map()
 
+  for (const sale of sales) {
+  const completeTime = sale.completeTime || sale.CompleteTime || ''
+  if (!completeTime) continue
+
+  const completedDate = new Date(completeTime)
+  if (Number.isNaN(completedDate.getTime())) continue
+
+  if (completedDate < fromDate) continue
+  if (completedDate > toDate) continue
+
+  if (String(sale.completed) !== 'true') continue
+  if (String(sale.voided) === 'true') continue
+  if (String(sale.archived) === 'true') continue
+
+  const saleLinesContainer = sale.SaleLines
+  const saleLines = Array.isArray(saleLinesContainer?.SaleLine)
+    ? saleLinesContainer.SaleLine
+    : saleLinesContainer?.SaleLine
+      ? [saleLinesContainer.SaleLine]
+      : []
+
   for (const line of saleLines) {
-  const itemId = String(line.itemID || line.ItemID || '').trim()
-  if (!itemId) continue
+    const itemId = String(line.itemID || line.ItemID || '').trim()
+    if (!itemId) continue
 
-  const createdAt = line.createTime || line.CreateTime || ''
-  if (!createdAt) continue
+    if (String(line.isLayaway) === 'true') continue
+    if (String(line.isSpecialOrder) === 'true') continue
 
-  const createdDate = new Date(createdAt)
-  if (Number.isNaN(createdDate.getTime())) continue
+    const item = itemMap.get(itemId)
+    if (!item) continue
 
-  if (createdDate < fromDate) continue
-  if (createdDate > toDate) continue
+    if (category && normalizeText(item.category) !== normalizeText(category)) continue
+    if (subcategory && normalizeText(item.subcategory) !== normalizeText(subcategory)) continue
+    if (brand && normalizeText(item.brand) !== normalizeText(brand)) continue
+    if (supplier && normalizeText(item.supplier) !== normalizeText(supplier)) continue
 
-  if (String(line.isWorkorder) === 'true') continue
+    if (itemSearchNorm) {
+      const searchPool = [
+        item.description,
+        item.systemId,
+        item.customSku,
+        item.upc
+      ].map(normalizeText).join(' ')
 
-  const item = itemMap.get(itemId)
-  if (!item) continue
-
-  if (category && normalizeText(item.category) !== normalizeText(category)) continue
-  if (subcategory && normalizeText(item.subcategory) !== normalizeText(subcategory)) continue
-  if (brand && normalizeText(item.brand) !== normalizeText(brand)) continue
-  if (supplier && normalizeText(item.supplier) !== normalizeText(supplier)) continue
-
-  if (itemSearchNorm) {
-    const searchPool = [
-      item.description,
-      item.systemId,
-      item.customSku,
-      item.upc
-    ].map(normalizeText).join(' ')
-
-    if (!searchPool.includes(itemSearchNorm)) continue
-  }
-
-  const customerId = String(line.customerID || line.CustomerID || '').trim()
-  const customerInfo = customerMap.get(customerId) || {
-    name: '',
-    type: '',
-    tags: []
-  }
-
-  const customerNameNorm = normalizeText(customerInfo.name)
-
-  if (customers.length > 0) {
-    if (blankCustomerMode === 'exclude' && !customerNameNorm) continue
-
-    if (
-      customerNameNorm &&
-      excludedCustomersNorm.some(excluded => excluded && customerNameNorm.includes(excluded))
-    ) {
-      continue
+      if (!searchPool.includes(itemSearchNorm)) continue
     }
 
-    if (!rowMatchesTypeFilter(customerInfo, typeMode, typeValue)) continue
+    const qty = Number(line.unitQuantity || line.UnitQuantity || line.quantity || 0)
+    if (!qty) continue
+
+    if (!grouped.has(itemId)) {
+      grouped.set(itemId, {
+        Description: item.description,
+        'System ID': item.systemId,
+        'Custom SKU': item.customSku,
+        UPC: item.upc,
+        Category: item.category,
+        Subcategory: item.subcategory,
+        Brand: item.brand,
+        Supplier: item.supplier,
+        'All 4 Dance West Stock': item.westStock,
+        'All 4 Dance South Stock': item.southStock,
+        'Total Stock': item.totalStock,
+        'Qty Sold': 0,
+        'Order Qty': 0,
+        _hasStockMatch: true
+      })
+    }
+
+    const row = grouped.get(itemId)
+    row['Qty Sold'] += qty
   }
-
-  const qty = Number(line.unitQuantity || line.UnitQuantity || line.quantity || 0)
-  if (!qty) continue
-
-  if (!grouped.has(itemId)) {
-    grouped.set(itemId, {
-      Description: item.description,
-      'System ID': item.systemId,
-      'Custom SKU': item.customSku,
-      UPC: item.upc,
-      Category: item.category,
-      Subcategory: item.subcategory,
-      Brand: item.brand,
-      Supplier: item.supplier,
-      'All 4 Dance West Stock': item.westStock,
-      'All 4 Dance South Stock': item.southStock,
-      'Total Stock': item.totalStock,
-      'Qty Sold': 0,
-      'Order Qty': 0,
-      _hasStockMatch: true
-    })
-  }
-
-  const row = grouped.get(itemId)
-  row['Qty Sold'] += qty
 }
 
     const rows = Array.from(grouped.values())
