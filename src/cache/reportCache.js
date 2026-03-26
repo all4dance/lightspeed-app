@@ -213,8 +213,6 @@ async function refreshSalesForDate(accountId, dateStr) {
         ? [data.Sale]
         : []
 
-    let shouldStopPaging = false
-
     for (const sale of sales) {
       const completeTime = sale.completeTime || sale.CompleteTime || ''
       if (!completeTime) continue
@@ -222,11 +220,7 @@ async function refreshSalesForDate(accountId, dateStr) {
       const completedDate = new Date(completeTime)
       if (Number.isNaN(completedDate.getTime())) continue
 
-      if (completedDate < fromDate) {
-        shouldStopPaging = true
-        continue
-      }
-
+      if (completedDate < fromDate) continue
       if (completedDate > toDate) continue
       if (String(sale.completed) !== 'true') continue
       if (String(sale.voided) === 'true') continue
@@ -254,34 +248,30 @@ async function refreshSalesForDate(accountId, dateStr) {
       }
     }
 
-    if (shouldStopPaging) {
+    const nextUrl =
+      data?.['@attributes']?.next ||
+      data?.attributes?.next ||
+      data?.next ||
+      null
+
+    if (!nextUrl) {
       nextEndpoint = null
     } else {
-      const nextUrl =
-        data?.['@attributes']?.next ||
-        data?.attributes?.next ||
-        data?.next ||
-        null
+      try {
+        const parsed = new URL(nextUrl)
+        const marker = `/API/V3/Account/${accountId}/`
+        const fullPath = `${parsed.pathname}${parsed.search}`
+        const markerIndex = fullPath.indexOf(marker)
 
-      if (!nextUrl) {
-        nextEndpoint = null
-      } else {
-        try {
-          const parsed = new URL(nextUrl)
-          const marker = `/API/V3/Account/${accountId}/`
-          const fullPath = `${parsed.pathname}${parsed.search}`
-          const markerIndex = fullPath.indexOf(marker)
-
-          if (markerIndex >= 0) {
-            nextEndpoint = fullPath.substring(markerIndex + marker.length)
-          } else {
-            nextEndpoint = parsed.pathname.replace(/^\/+/, '') + parsed.search
-          }
-        } catch (err) {
-          let cleaned = String(nextUrl).replace(/^https?:\/\/[^/]+\//, '')
-          cleaned = cleaned.replace(/^API\/V3\/Account\/[^/]+\//, '')
-          nextEndpoint = cleaned
+        if (markerIndex >= 0) {
+          nextEndpoint = fullPath.substring(markerIndex + marker.length)
+        } else {
+          nextEndpoint = parsed.pathname.replace(/^\/+/, '') + parsed.search
         }
+      } catch (err) {
+        let cleaned = String(nextUrl).replace(/^https?:\/\/[^/]+\//, '')
+        cleaned = cleaned.replace(/^API\/V3\/Account\/[^/]+\//, '')
+        nextEndpoint = cleaned
       }
     }
 
