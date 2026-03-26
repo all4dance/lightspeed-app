@@ -1776,4 +1776,13 @@ router.get('/cache/debug-sales-shops/:accountId', async (req, res) => {
   }
 })
 
+router.get('/cache/view-sales', async (req, res) => {
+  try {
+    const sales = await getSalesCache()
+    return res.json(sales)
+  } catch (err) {
+    return res.status(500).json({ error: err.message })
+  }
+})
+
 module.exports = router
