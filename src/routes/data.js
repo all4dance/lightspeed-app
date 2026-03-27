@@ -15,7 +15,7 @@ const SALES_ITEM_CACHE = {
 }
 
 const { apiRequest } = require('../lightspeed')
-const { refreshSalesRange } = require('../cache/reportCache')
+
 
 const {
   refreshItemsCache,
