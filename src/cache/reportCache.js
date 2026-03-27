@@ -325,11 +325,12 @@ if (String(line.isLayaway) === 'true') continue
 }
 
 async function refreshSalesRange(accountId, daysBack = 1) {
-  const today = new Date()
+  const now = new Date()
+  const edmontonNow = new Date(now.getTime() - (6 * 60 * 60 * 1000))
   const results = []
 
   for (let i = 0; i < daysBack; i += 1) {
-    const d = new Date(today)
+    const d = new Date(edmontonNow)
     d.setDate(d.getDate() - i)
     const dateStr = new Date(
   d.getTime() - d.getTimezoneOffset() * 60000
