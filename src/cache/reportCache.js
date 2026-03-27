@@ -196,15 +196,16 @@ async function getItemsCache() {
 }
 
 async function refreshSalesForDate(accountId, dateStr) {
-  const fromDate = new Date(`${dateStr}T00:00:00-06:00`)
-  const toDate = new Date(`${dateStr}T23:59:59-06:00`)
+  const fromDate = new Date(`${dateStr}T00:00:00.000Z`)
+const toDate = new Date(`${dateStr}T00:00:00.000Z`)
+toDate.setUTCDate(toDate.getUTCDate() + 1)
 
   let nextEndpoint =
     `Sale.json?completed=true&voided=false&archived=false&timeStamp=%3E%3C,${encodeURIComponent(fromDate.toISOString())},${encodeURIComponent(toDate.toISOString())}&sort=-timeStamp&load_relations=["SaleLines"]&limit=100`
 
   const grouped = {}
   let pageCount = 0
-  const maxPages = 10
+  while (nextEndpoint)
 
   while (nextEndpoint && pageCount < maxPages) {
     pageCount += 1
@@ -225,7 +226,7 @@ async function refreshSalesForDate(accountId, dateStr) {
       if (Number.isNaN(completedDate.getTime())) continue
 
       if (completedDate < fromDate) continue
-      if (completedDate > toDate) continue
+      if (completedDate >= toDate) continue
       if (String(sale.completed) !== 'true') continue
       if (String(sale.voided) === 'true') continue
       if (String(sale.archived) === 'true') continue
@@ -243,9 +244,8 @@ async function refreshSalesForDate(accountId, dateStr) {
         const itemId = String(line.itemID || line.ItemID || '').trim()
         if (!itemId) continue
 
-        if (String(line.isLayaway) === 'true') continue
-        if (String(line.isSpecialOrder) === 'true') continue
-        if (String(line.isWorkorder) === 'true') continue
+        // Only skip layaways (optional)
+if (String(line.isLayaway) === 'true') continue
 
         const qty = Number(line.unitQuantity || line.UnitQuantity || line.quantity || 0)
         if (!qty) continue
