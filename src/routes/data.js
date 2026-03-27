@@ -15,6 +15,7 @@ const SALES_ITEM_CACHE = {
 }
 
 const { apiRequest } = require('../lightspeed')
+const { refreshSalesRange } = require('../cache/reportCache')
 
 const {
   refreshItemsCache,
@@ -1782,6 +1783,27 @@ router.get('/cache/view-sales', async (req, res) => {
     return res.json(sales)
   } catch (err) {
     return res.status(500).json({ error: err.message })
+  }
+})
+
+router.get('/refresh-sales/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params
+    const days = Number(req.query.days || 1)
+
+    const result = await refreshSalesRange(accountId, days)
+
+    res.json({
+      success: true,
+      accountId,
+      days,
+      result
+    })
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err.message
+    })
   }
 })
 
