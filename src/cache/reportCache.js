@@ -331,7 +331,9 @@ async function refreshSalesRange(accountId, daysBack = 1) {
   for (let i = 0; i < daysBack; i += 1) {
     const d = new Date(today)
     d.setDate(d.getDate() - i)
-    const dateStr = d.toISOString().slice(0, 10)
+    const dateStr = new Date(
+  d.getTime() - d.getTimezoneOffset() * 60000
+).toISOString().slice(0, 10)
 
     const result = await refreshSalesForDate(accountId, dateStr)
 
