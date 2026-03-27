@@ -204,10 +204,9 @@ toDate.setUTCDate(toDate.getUTCDate() + 1)
     `Sale.json?completed=true&voided=false&archived=false&timeStamp=%3E%3C,${encodeURIComponent(fromDate.toISOString())},${encodeURIComponent(toDate.toISOString())}&sort=-timeStamp&load_relations=["SaleLines"]&limit=100`
 
   const grouped = {}
-  let pageCount = 0
-  while (nextEndpoint)
+let pageCount = 0
 
-  while (nextEndpoint && pageCount < maxPages) {
+while (nextEndpoint) {
     pageCount += 1
 
     const response = await apiRequest(accountId, nextEndpoint)
