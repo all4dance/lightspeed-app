@@ -197,16 +197,16 @@ async function getItemsCache() {
 
 async function refreshSalesForDate(accountId, dateStr) {
   const fromDate = new Date(`${dateStr}T00:00:00.000Z`)
-const toDate = new Date(`${dateStr}T00:00:00.000Z`)
-toDate.setUTCDate(toDate.getUTCDate() + 1)
+  const toDate = new Date(`${dateStr}T00:00:00.000Z`)
+  toDate.setUTCDate(toDate.getUTCDate() + 1)
 
   let nextEndpoint =
     `Sale.json?completed=true&voided=false&archived=false&timeStamp=%3E%3C,${encodeURIComponent(fromDate.toISOString())},${encodeURIComponent(toDate.toISOString())}&sort=-timeStamp&load_relations=["SaleLines"]&limit=100`
 
   const grouped = {}
-let pageCount = 0
+  let pageCount = 0
 
-while (nextEndpoint) {
+  while (nextEndpoint) {
     pageCount += 1
 
     const response = await apiRequest(accountId, nextEndpoint)
@@ -243,8 +243,7 @@ while (nextEndpoint) {
         const itemId = String(line.itemID || line.ItemID || '').trim()
         if (!itemId) continue
 
-        // Only skip layaways (optional)
-if (String(line.isLayaway) === 'true') continue
+        if (String(line.isLayaway) === 'true') continue
 
         const qty = Number(line.unitQuantity || line.UnitQuantity || line.quantity || 0)
         if (!qty) continue
@@ -326,6 +325,7 @@ if (String(line.isLayaway) === 'true') continue
 
 async function refreshSalesRange(accountId, daysBack = 1) {
   const now = new Date()
+  // Use Mountain Time (UTC-7 in summer, UTC-6 in winter) — approximate with Edmonton offset
   const edmontonNow = new Date(now.getTime() - (6 * 60 * 60 * 1000))
   const results = []
 
@@ -333,8 +333,8 @@ async function refreshSalesRange(accountId, daysBack = 1) {
     const d = new Date(edmontonNow)
     d.setDate(d.getDate() - i)
     const dateStr = new Date(
-  d.getTime() - d.getTimezoneOffset() * 60000
-).toISOString().slice(0, 10)
+      d.getTime() - d.getTimezoneOffset() * 60000
+    ).toISOString().slice(0, 10)
 
     const result = await refreshSalesForDate(accountId, dateStr)
 

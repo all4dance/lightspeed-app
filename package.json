@@ -1,14 +1,14 @@
 {
-  "name": "lightspeed-app",
+  "name": "all4dance-reports",
   "version": "1.0.0",
-  "description": "",
+  "description": "All 4 Dance Sales Report Dashboard — Lightspeed R-Series",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "node --watch src/server.js"
   },
   "keywords": [],
-  "author": "",
+  "author": "All 4 Dance",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {

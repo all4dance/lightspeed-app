@@ -65,7 +65,8 @@ async function exchangeCodeForToken(code) {
     client_id: LIGHTSPEED_CLIENT_ID,
     client_secret: LIGHTSPEED_CLIENT_SECRET,
     grant_type: 'authorization_code',
-    code
+    code,
+    redirect_uri: LIGHTSPEED_REDIRECT_URI
   })
 
   const res = await axios.post(`${OAUTH_BASE}/token`, params.toString(), {
@@ -104,11 +105,12 @@ async function getAccountFromToken(accessToken) {
 
   return res.data
 }
+
 async function ensureValidAccessToken(accountId) {
   const conn = getConnection(accountId)
 
   if (!conn) {
-    throw new Error('No Lightspeed connection found')
+    throw new Error('No Lightspeed connection found. Please connect via /auth/connect.')
   }
 
   const now = Date.now()
@@ -159,5 +161,6 @@ module.exports = {
   exchangeCodeForToken,
   getAccountFromToken,
   upsertConnection,
+  getConnection,
   apiRequest
 }

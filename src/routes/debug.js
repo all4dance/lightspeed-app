@@ -1,42 +1,33 @@
-// src/routes/debug.js
-const express = require('express');
-const router = express.Router();
-const { apiRequest } = require('../lightspeed');  // adjust if lightspeed.js is in src/services/ or elsewhere
+const express = require('express')
+const router = express.Router()
+const { apiRequest } = require('../lightspeed')
 
 router.get('/shops/:accountId', async (req, res) => {
-  const { accountId } = req.params;
+  const { accountId } = req.params
   try {
-    const data = await apiRequest(accountId, 'Shop.json?limit=100');
-    res.json(data.Shop || data); // handles { Shop: [...] } or direct array
+    const data = await apiRequest(accountId, 'Shop.json?limit=100')
+    res.json(data.Shop || data)
   } catch (err) {
-    console.error('Shops fetch error:', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('Shops fetch error:', err.message)
+    res.status(500).json({ error: err.message })
   }
-});
+})
 
-// Optional: quick test for items with shops (useful for debugging QOH fields)
 router.get('/items-sample/:accountId', async (req, res) => {
-  const { accountId } = req.params;
+  const { accountId } = req.params
   try {
-    const data = await apiRequest(accountId, 'Item.json?load_relations=["ItemShops"]&limit=2');
-    res.json(data);
+    const data = await apiRequest(accountId, 'Item.json?load_relations=["ItemShops"]&limit=2')
+    res.json(data)
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message })
   }
-});
+})
 
- // DEBUG ITEMS SAMPLE
 router.get('/reports/debug-items/:accountId', async (req, res) => {
   try {
     const { accountId } = req.params
-
-    const itemsData = await apiRequest(
-      accountId,
-      'Item.json?load_relations=["ItemShops"]&limit=5'
-    )
-
-    const items = getItemArray(itemsData)
-
+    const data = await apiRequest(accountId, 'Item.json?load_relations=["ItemShops"]&limit=5')
+    const items = Array.isArray(data?.Item) ? data.Item : data?.Item ? [data.Item] : []
     return res.json({
       success: true,
       count: items.length,
@@ -48,4 +39,4 @@ router.get('/reports/debug-items/:accountId', async (req, res) => {
   }
 })
 
-module.exports = router;
+module.exports = router
